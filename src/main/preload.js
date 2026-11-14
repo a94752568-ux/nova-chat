@@ -13,6 +13,60 @@ contextBridge.exposeInMainWorld("novaAPI", {
   listModels: () => ipcRenderer.invoke("ollama:models"),
   chat: (payload) => ipcRenderer.invoke("ollama:chat", payload),
 
+  // Chat en streaming: main reenvía los fragmentos por eventos IPC filtrados
+  // por requestId. Devuelve { cancel, cleanup } para abortar la generación.
+  chatStream: (payload, handlers) => {
+    const requestId = payload && payload.requestId;
+    const matches = (data) => data && data.requestId === requestId;
+
+    const onChunk = (_e, data) => {
+      if (matches(data) && handlers && handlers.onChunk) handlers.onChunk(data.chunk);
+    };
+    const onDone = (_e, data) => {
+      if (matches(data)) {
+        cleanup();
+        if (handlers && handlers.onDone) handlers.onDone(data);
+      }
+    };
+    const onAborted = (_e, data) => {
+      if (matches(data)) {
+        cleanup();
+        if (handlers && handlers.onAborted) handlers.onAborted(data);
+      }
+    };
+    const onError = (_e, data) => {
+      if (matches(data)) {
+        cleanup();
+        if (handlers && handlers.onError) handlers.onError(data && data.error);
+      }
+    };
+    const cleanup = () => {
+      ipcRenderer.removeListener("ollama:chunk", onChunk);
+      ipcRenderer.removeListener("ollama:done", onDone);
+      ipcRenderer.removeListener("ollama:aborted", onAborted);
+      ipcRenderer.removeListener("ollama:error", onError);
+    };
+
+    ipcRenderer.on("ollama:chunk", onChunk);
+    ipcRenderer.on("ollama:done", onDone);
+    ipcRenderer.on("ollama:aborted", onAborted);
+    ipcRenderer.on("ollama:error", onError);
+
+    ipcRenderer.invoke("ollama:chat-stream", payload).catch((error) => {
+      cleanup();
+      if (handlers && handlers.onError) handlers.onError(error && error.message);
+    });
+
+    return {
+      cancel: () => ipcRenderer.invoke("ollama:abort", requestId),
+      cleanup
+    };
+  },
+
+  // Historial de conversación
+  saveConversation: (messages) => ipcRenderer.invoke("conversations:save", messages),
+  loadConversation: () => ipcRenderer.invoke("conversations:load"),
+
   // Gramática (tipo Grammarly)
   checkGrammar: ({ text, model }) =>
     ipcRenderer.invoke("grammar:check", { text, model }),
@@ -40,6 +94,3 @@ contextBridge.exposeInMainWorld("novaAPI", {
     }
   }
 });
-
-// Tipo para TypeScript (opcional, solo documentación)
-// window.novaAPI = novaAPI;
