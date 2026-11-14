@@ -2,6 +2,44 @@
    Nova Chat — Estilos Cyberpunk adicionales
    ============================================================================ */
 
+/* ----------------------------------------------------------------------------
+   Tokens de color — Tema DARK (por defecto)
+   Antes NO existían: solo había bloques para OLED y light, así que todas las
+   variables (--text, --surface, --border...) quedaban indefinidas con
+   data-theme="dark", el navegador descartaba color: var(--text) y el texto
+   heredaba el negro del sistema sobre el fondo oscuro de la ventana.
+   Paleta alineada a la marca: violeta #7c6cf6 / cyan #22d3ee sobre #0b0817.
+   ---------------------------------------------------------------------------- */
+:root,
+[data-theme="dark"] {
+  --bg-0: #0b0817;
+  --bg-1: #0f0c1f;
+  --bg-2: #141028;
+
+  --surface: #151022;
+  --surface-2: #1d1730;
+  --surface-3: #272045;
+
+  --text: #e8e6f2;
+  --text-2: #a9a3c2;
+  --text-3: #6f6889;
+
+  --border: #241d3a;
+  --border-strong: #3a3159;
+
+  --glass: rgba(15, 12, 31, 0.78);
+
+  --asst-bubble: rgba(32, 26, 56, 0.82);
+  --user-bubble: rgba(124, 108, 246, 0.20);
+  --user-bubble-border: rgba(167, 139, 250, 0.38);
+
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.45);
+  --shadow-2: 0 10px 25px -5px rgba(0, 0, 0, 0.55);
+  --glow: 0 0 20px rgba(124, 108, 246, 0.12);
+
+  --neon-text-shadow: 0 0 8px rgba(34, 211, 238, 0.35);
+}
+
 /* Efectos de brillo neon */
 .cyber-glow-cyan {
   box-shadow: var(--neon-glow-cyan);
