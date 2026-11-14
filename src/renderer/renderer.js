@@ -274,6 +274,22 @@ function setupAutocompleteListeners() {
   });
 }
 
+// Los botones del editor de gramática (Revisar / Corregir todo / Limpiar).
+// NOTA: esta función DEBE existir — setupEventListeners() la llama antes de
+// setupSettingsListeners(); si falta, el ReferenceError mata init() y deja
+// sin listeners el tema y TODA la configuración (bug del 2026-11-14).
+function setupGrammarListeners() {
+  if (dom.btnCheckCurrent) {
+    dom.btnCheckCurrent.addEventListener("click", checkGrammarInEditor);
+  }
+  if (dom.btnFixAll) {
+    dom.btnFixAll.addEventListener("click", fixAllGrammar);
+  }
+  if (dom.btnClearGrammar) {
+    dom.btnClearGrammar.addEventListener("click", clearGrammarEditor);
+  }
+}
+
 function setupSettingsListeners() {
   dom.settingBaseUrl.addEventListener("change", (e) => {
     state.settings.baseUrl = e.target.value;
