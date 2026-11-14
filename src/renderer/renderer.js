@@ -26,6 +26,7 @@ const state = {
   selectedModel: "",
   messages: [],
   generating: false,
+  activeStreamCancel: null,
   grammar: {
     enabled: false,
     issues: [],
@@ -38,8 +39,7 @@ const state = {
     active: false,
     prefix: "",
     abortController: null
-  },
-  debounceTimers: new Map()
+  }
 };
 
 // ============================================================================
@@ -80,7 +80,6 @@ function cacheDom() {
   dom.autocompleteItems = $$(".autocomplete-item");
 
   // Gramática
-  dom.grammarToggleBtn = $("#btn-grammar-toggle") || null;
   dom.grammarStats = $("#grammar-stats");
   dom.grammarScore = $("#grammar-score");
   dom.grammarList = $("#grammar-list");
@@ -141,6 +140,7 @@ async function init() {
   await loadSettings();
   await loadModels();
   await checkOllamaStatus();
+  await loadConversation();
   applyTheme();
   updateOllamaStatusUI();
 
@@ -184,9 +184,8 @@ function setupEventListeners() {
   if (dom.btnStop) {
     dom.btnStop.addEventListener("click", stopGeneration);
   }
-  if (dom.btnSend) {
-    dom.btnSend.addEventListener("click", () => dom.composerForm.dispatchEvent(new Event("submit")));
-  }
+  // El botón enviar es type="submit": el submit nativo del form ya dispara
+  // handleSendMessage. Un dispatch manual aquí duplicaría el envío.
   if (dom.btnClearChat) {
     dom.btnClearChat.addEventListener("click", clearChat);
   }
@@ -442,6 +441,12 @@ async function loadModels() {
 function updateModelSelectors(models) {
   // Sidebar
   dom.sidebarModelSelect.innerHTML = "";
+  if (!models.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Sin modelos — ¿Ollama está corriendo?";
+    dom.sidebarModelSelect.appendChild(option);
+  }
   models.forEach((m) => {
     const option = document.createElement("option");
     option.value = m.name || m.model;
@@ -479,6 +484,25 @@ function updateModelSelectors(models) {
 // ============================================================================
 // Chat y mensajería
 // ============================================================================
+
+// Auto-crecer el textarea mientras el usuario escribe.
+function handleComposerInput() {
+  autoResizeTextarea();
+}
+
+// Enter envía, Shift+Enter salto de línea. Si el dropdown de autocompletado
+// está activo, SU listener decide (aceptar/navegar) y aquí no se envía.
+function handleComposerKeydown(event) {
+  if (event.key === "Enter" && !event.shiftKey && !state.autocomplete.active) {
+    event.preventDefault();
+    if (typeof dom.composerForm.requestSubmit === "function") {
+      dom.composerForm.requestSubmit();
+    } else {
+      dom.composerForm.dispatchEvent(new Event("submit"));
+    }
+  }
+}
+
 async function handleSendMessage(event) {
   event.preventDefault();
 
@@ -504,26 +528,14 @@ async function handleSendMessage(event) {
 
   try {
     const model = state.selectedModel || state.settings.model || "";
-    const messages = [
-      ...state.messages.slice(-state.settings.historyWindow || 10).map((m) => ({
-        role: m.role,
-        content: m.content
-      })),
-      { role: "user", content: text }
-    ];
+    // addUserMessage ya pusheó el mensaje del usuario a state.messages:
+    // NO volver a agregarlo (antes viajaba duplicado a Ollama).
+    const messages = state.messages.slice(-10).map((m) => ({
+      role: m.role,
+      content: m.content
+    }));
 
-    const response = await window.novaAPI.chat({
-      model,
-      messages,
-      stream: true,
-      temperature: state.settings.temperature,
-      topP: state.settings.topP,
-      numCtx: state.settings.numCtx,
-      repeatPenalty: state.settings.repeatPenalty
-    });
-
-    // Procesar stream
-    await handleStreamResponse(response);
+    await runChatStream(model, messages);
 
   } catch (error) {
     console.error("[Nova] Error en chat:", error);
@@ -533,16 +545,18 @@ async function handleSendMessage(event) {
   }
 }
 
-async function handleStreamResponse(stream) {
+// Chat por streaming real: main itera la respuesta de Ollama y reenvía los
+// fragmentos por eventos IPC (ollama:chunk / done / aborted / error).
+async function runChatStream(model, messages) {
   state.generating = true;
   dom.btnStop.hidden = false;
   dom.btnSend.hidden = true;
 
-  // Crear mensaje del asistente
   const assistantMessage = {
     id: generateId(),
     role: "assistant",
     content: "",
+    model,
     createdAt: Date.now()
   };
   state.messages.push(assistantMessage);
@@ -553,38 +567,70 @@ async function handleStreamResponse(stream) {
 
   const contentElement = messageElement.querySelector(".bubble");
   let fullContent = "";
+  let finished = false;
 
-  try {
-    for await (const chunk of stream) {
-      if (chunk.message && chunk.message.content) {
-        fullContent += chunk.message.content;
-        contentElement.textContent = fullContent;
-        assistantMessage.content = fullContent;
-        scrollToBottom();
-      }
-      if (chunk.done) break;
-    }
-
-    assistantMessage.durationMs = Date.now() - assistantMessage.createdAt;
-    updateMessageMeta(messageElement, assistantMessage);
-
-    // Verificar gramática si está habilitada
-    if (state.settings.grammarEnabled && fullContent.trim().length > 3) {
-      await checkGrammarForText(fullContent, assistantMessage.id);
-    }
-
-  } catch (error) {
-    console.error("[Nova] Error en stream:", error);
-    contentElement.textContent = "Error al generar la respuesta.";
-    contentElement.classList.add("bubble--error");
-  } finally {
+  const finish = () => {
+    if (finished) return;
+    finished = true;
     state.generating = false;
+    state.activeStreamCancel = null;
     hideTyping();
     dom.btnStop.hidden = true;
     dom.btnSend.hidden = false;
-    dom.composerHint.textContent = "Respuesta generada";
+
+    if (fullContent.trim()) {
+      assistantMessage.durationMs = Date.now() - assistantMessage.createdAt;
+      updateMessageMeta(messageElement, assistantMessage);
+      if (state.settings.grammarEnabled && fullContent.trim().length > 3) {
+        checkGrammarForText(fullContent, assistantMessage.id);
+      }
+      dom.composerHint.textContent = "Respuesta generada";
+    } else {
+      dom.composerHint.textContent = "Sin respuesta del modelo";
+    }
     saveConversation();
-  }
+  };
+
+  const stream = window.novaAPI.chatStream(
+    {
+      requestId: "chat_" + Date.now() + "_" + Math.random().toString(36).slice(2, 9),
+      model,
+      messages,
+      temperature: state.settings.temperature,
+      topP: state.settings.topP,
+      numCtx: state.settings.numCtx,
+      repeatPenalty: state.settings.repeatPenalty
+    },
+    {
+      onChunk: (chunk) => {
+        if (chunk && chunk.message && chunk.message.content) {
+          fullContent += chunk.message.content;
+          assistantMessage.content = fullContent;
+          contentElement.textContent = fullContent;
+          scrollToBottom();
+        }
+      },
+      onDone: finish,
+      onAborted: () => {
+        if (!fullContent.trim()) {
+          // Abortado sin contenido: descartar la burbuja vacía
+          state.messages = state.messages.filter((m) => m.id !== assistantMessage.id);
+          messageElement.remove();
+        }
+        dom.composerHint.textContent = "Generación detenida";
+        finish();
+      },
+      onError: (error) => {
+        console.error("[Nova] Error en stream:", error);
+        contentElement.textContent = "Error al generar la respuesta.";
+        contentElement.classList.add("bubble--error");
+        dom.composerHint.textContent = "Error al generar respuesta";
+        toast("Error al conectar con Ollama", "error");
+        finish();
+      }
+    }
+  );
+  state.activeStreamCancel = stream.cancel;
 }
 
 function addUserMessage(text) {
@@ -679,12 +725,11 @@ function hideTyping() {
 }
 
 function stopGeneration() {
-  // En una implementación completa, se enviaría una señal de aborto
-  state.generating = false;
-  dom.btnStop.hidden = true;
-  dom.btnSend.hidden = false;
-  hideTyping();
-  dom.composerHint.textContent = "Generación detenida";
+  // Abort real: pide a main que cancele la petición HTTP de Ollama.
+  // El flujo termina vía onAborted (conserva la respuesta parcial).
+  if (state.activeStreamCancel) {
+    state.activeStreamCancel();
+  }
 }
 
 function clearChat() {
@@ -725,8 +770,13 @@ function triggerAutocomplete() {
   requestAutocomplete(beforeCursor);
 }
 
+// Contador de peticiones de autocompletado: si el usuario siguió tecleando,
+// las respuestas que llegan tarde se descartan (evita sugerencias obsoletas).
+let autocompleteRequestId = 0;
+
 async function requestAutocomplete(textBeforeCursor) {
   const model = state.selectedModel || state.settings.model || "";
+  const requestId = ++autocompleteRequestId;
 
   try {
     const response = await window.novaAPI.chat({
@@ -745,6 +795,8 @@ async function requestAutocomplete(textBeforeCursor) {
       repeatPenalty: 1.1
     });
 
+    if (requestId !== autocompleteRequestId) return; // respuesta obsoleta
+
     const content = response.message && response.message.content ? response.message.content : "";
     const clean = content.trim().replace(/\n+/g, " ").slice(0, 200);
 
@@ -762,7 +814,6 @@ async function requestAutocomplete(textBeforeCursor) {
     showAutocomplete(suggestions);
 
   } catch (error) {
-    if (error.name === "AbortError") return;
     hideAutocomplete();
     toast("Autocompletado: no se pudo conectar con Ollama", "error");
   }
@@ -907,6 +958,14 @@ async function checkGrammarInEditor() {
   }
 }
 
+// Tipos de issue válidos: el "type" viene del JSON del modelo y se interpola
+// en atributos class — whitelist para evitar inyección de HTML.
+const ISSUE_TYPES = ["grammar", "spelling", "clarity", "tone"];
+
+function safeIssueType(issue) {
+  return issue && ISSUE_TYPES.includes(issue.type) ? issue.type : "grammar";
+}
+
 async function fixAllGrammar() {
   if (state.grammar.issues.length === 0) return;
 
@@ -914,12 +973,33 @@ async function fixAllGrammar() {
     const text = dom.grammarInput.value;
     let corrected = text;
 
-    // Aplicar correcciones de derecha a izquierda para preservar índices
+    // Aplicar correcciones de derecha a izquierda para preservar índices.
+    // Los índices los inventa el modelo: validarlos ANTES de cortar el texto.
     const sorted = [...state.grammar.issues].sort((a, b) => b.start - a.start);
+    let applied = 0;
     for (const issue of sorted) {
-      if (issue.suggestion) {
-        corrected = corrected.slice(0, issue.start) + issue.suggestion + corrected.slice(issue.end);
+      if (!issue.suggestion) continue;
+      const start = Number(issue.start);
+      const end = Number(issue.end);
+      if (!Number.isInteger(start) || !Number.isInteger(end)) continue;
+      if (start < 0 || start >= end || end > corrected.length) continue;
+
+      if (corrected.slice(start, end) === issue.text) {
+        corrected = corrected.slice(0, start) + issue.suggestion + corrected.slice(end);
+        applied++;
+        continue;
       }
+      // Índice equivocado: intentar localizar el texto exacto del issue
+      const found = corrected.indexOf(issue.text);
+      if (found !== -1) {
+        corrected = corrected.slice(0, found) + issue.suggestion + corrected.slice(found + issue.text.length);
+        applied++;
+      }
+    }
+
+    if (applied === 0) {
+      toast("Ninguna corrección se pudo aplicar con seguridad", "info");
+      return;
     }
 
     dom.grammarInput.value = corrected;
@@ -1013,10 +1093,11 @@ function renderGrammarStats() {
       };
 
       for (const issue of issues.slice(0, 10)) {
+        const type = safeIssueType(issue);
         const item = document.createElement("div");
-        item.className = `grammar-stats__item grammar-stats__item--${issue.type}`;
+        item.className = `grammar-stats__item grammar-stats__item--${type}`;
         item.innerHTML = `
-          <span class="grammar-stats__item-type grammar-stats__item-type--${issue.type}">${typeLabels[issue.type] || issue.type}</span>
+          <span class="grammar-stats__item-type grammar-stats__item-type--${type}">${typeLabels[type]}</span>
           <span class="grammar-stats__item-text">${escapeHtml(issue.text)}</span>
           <span class="grammar-stats__item-suggestion">→ ${escapeHtml(issue.suggestion || issue.text)}</span>
         `;
@@ -1041,13 +1122,16 @@ function displayGrammarIssues(issues) {
     tone: "Tono"
   };
 
-  dom.grammarOutput.innerHTML = issues.map((issue) => `
-    <div class="grammar-stats__item grammar-stats__item--${issue.type}">
-      <span class="grammar-stats__item-type grammar-stats__item-type--${issue.type}">${typeLabels[issue.type] || issue.type}</span>
+  dom.grammarOutput.innerHTML = issues.map((issue) => {
+    const type = safeIssueType(issue);
+    return `
+    <div class="grammar-stats__item grammar-stats__item--${type}">
+      <span class="grammar-stats__item-type grammar-stats__item-type--${type}">${typeLabels[type]}</span>
       <span class="grammar-stats__item-text">${escapeHtml(issue.text)}</span>
       <span class="grammar-stats__item-suggestion">→ ${escapeHtml(issue.suggestion || issue.text)}</span>
     </div>
-  `).join("");
+  `;
+  }).join("");
 }
 
 // ============================================================================
@@ -1122,12 +1206,7 @@ function switchSection(section) {
   });
 
   // Actualizar título
-  const titles = {
-    chat: "Conversación",
-    grammar: "Corrección Gramatical",
-    history: "Historial",
-    settings: "Configuración"
-  };
+  // (los títulos por sección los maneja cada panel; aquí solo se conmuta)
 
   // Si es gramática, cargar estadísticas
   if (section === "grammar" && state.settings.grammarEnabled) {
@@ -1138,10 +1217,26 @@ function switchSection(section) {
 // ============================================================================
 // Persistencia
 // ============================================================================
-function saveConversation() {
+async function saveConversation() {
+  if (!window.novaAPI || !window.novaAPI.saveConversation) return;
   try {
-    // Guardar en una variable de sesión o localStorage
-    // En una implementación completa, se usaría electron.store o similar
+    await window.novaAPI.saveConversation(state.messages);
+  } catch (_) {
+    /* silencioso: persistir no debe romper el chat */
+  }
+}
+
+async function loadConversation() {
+  if (!window.novaAPI || !window.novaAPI.loadConversation) return;
+  try {
+    const result = await window.novaAPI.loadConversation();
+    if (result && result.ok && Array.isArray(result.messages) && result.messages.length > 0) {
+      state.messages = result.messages;
+      for (const message of state.messages) {
+        dom.messages.appendChild(createMessageElement(message));
+      }
+      scrollToBottom();
+    }
   } catch (_) {
     /* silencioso */
   }
