@@ -60,6 +60,29 @@ function persistSettings() {
 }
 
 // ============================================================================
+// Icono de la app
+// ============================================================================
+// Preferencia: icon.png real si algún día existe; si no, decodifica el
+// sidecar icon.png.b64 (las herramientas de commit del repo solo aceptan
+// texto, así que el PNG vive como base64 y se materializa en runtime).
+function loadAppIcon() {
+  const assetsDir = path.join(__dirname, "../renderer/assets");
+  try {
+    const fromPng = nativeImage.createFromPath(path.join(assetsDir, "icon.png"));
+    if (!fromPng.isEmpty()) return fromPng;
+  } catch (_) {
+    // seguimos con el sidecar
+  }
+  try {
+    const b64 = fs.readFileSync(path.join(assetsDir, "icon.png.b64"), "utf8").trim();
+    const img = nativeImage.createFromBuffer(Buffer.from(b64, "base64"));
+    return img.isEmpty() ? null : img;
+  } catch (_) {
+    return null;
+  }
+}
+
+// ============================================================================
 // Inicialización de Ollama
 // ============================================================================
 function initOllama() {
@@ -99,7 +122,7 @@ function createMainWindow() {
     show: false,
     frame: false,
     backgroundColor: "#0f172a",
-    icon: path.join(__dirname, "../renderer/assets/icon.png"),
+    icon: loadAppIcon() || undefined,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -138,12 +161,11 @@ function createMainWindow() {
 // ============================================================================
 function createTray() {
   try {
-    const iconPath = path.join(__dirname, "../renderer/assets/icon.png");
-    const trayIcon = nativeImage.createFromPath(iconPath);
+    const trayIcon = loadAppIcon();
 
     // Sin imagen válida, crear la Tray lanza en Linux y tumba la app en "ready".
-    if (trayIcon.isEmpty()) {
-      console.warn("[Nova] Icono de bandeja no encontrado en", iconPath, "- bandeja deshabilitada");
+    if (!trayIcon) {
+      console.warn("[Nova] Icono de bandeja no disponible - bandeja deshabilitada");
       tray = null;
       return;
     }
