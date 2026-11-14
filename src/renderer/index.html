@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark light" />
+  <title>Nova Chat — Asistente IA Local</title>
+  <link rel="stylesheet" href="styles/main.css" />
+  <link rel="stylesheet" href="styles/components.css" />
+  <link rel="stylesheet" href="styles/cyberpunk.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <!-- Botones de control de ventana en la esquina superior derecha (sin header del sistema) -->
+  <div class="window-controls" id="window-controls">
+    <button class="window-control-btn window-control-btn--minimize" id="btn-minimize" aria-label="Minimizar">−</button>
+    <button class="window-control-btn window-control-btn--maximize" id="btn-maximize" aria-label="Maximizar">□</button>
+    <button class="window-control-btn window-control-btn--close" id="btn-close" aria-label="Cerrar">✕</button>
+    <button class="window-control-btn window-control-btn--settings" id="btn-settings" title="Configuración" aria-label="Abrir configuración">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.1 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6h.1A1.7 1.7 0 0 0 10 3.1V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+    </button>
+    <button class="window-control-btn window-control-btn--ollama-status" id="btn-ollama-status" title="Estado de Ollama" aria-label="Estado de Ollama">
+      <span class="status-dot" id="ollama-dot" data-state="checking"></span>
+      <span id="ollama-text">Conectando…</span>
+    </button>
+  </div>
+
+  <div class="app" id="app">
+    <!-- Barra lateral -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar__brand">
+        <div class="sidebar__logo">
+          <svg viewBox="0 0 32 32" width="32" height="32" aria-hidden="true">
+            <defs>
+              <linearGradient id="sidebarNovaGrad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#a78bfa" />
+                <stop offset="55%" stop-color="#7c6cf6" />
+                <stop offset="100%" stop-color="#22d3ee" />
+              </linearGradient>
+            </defs>
+            <rect x="1.5" y="1.5" width="29" height="29" rx="9" fill="url(#sidebarNovaGrad)" opacity="0.16" />
+            <rect x="1.5" y="1.5" width="29" height="29" rx="9" fill="none" stroke="url(#sidebarNovaGrad)" stroke-width="1.4" opacity="0.75" />
+            <path d="M16 6.4 L18.5 13.5 L25.6 16 L18.5 18.5 L16 25.6 L13.5 18.5 L6.4 16 L13.5 13.5 Z" fill="url(#sidebarNovaGrad)" />
+            <circle cx="16" cy="16" r="2.1" fill="#0b0817" opacity="0.55" />
+          </svg>
+        </div>
+        <h2 class="sidebar__title">Nova Chat</h2>
+      </div>
+
+      <nav class="sidebar__nav">
+        <button class="nav-item nav-item--active" data-section="chat" aria-label="Conversación">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M3 4a1 1 0 0 1 1-1h16a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1Zm0 4a1 1 0 0 1 1-1h16a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1Zm0 4a1 1 0 0 1 1-1h16a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <span>Conversación</span>
+        </button>
+        <button class="nav-item" data-section="grammar" aria-label="Corrección gramatical">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15 17h5l-1.405-1.405A2 2 0 0 1 18 14.148V15a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-0.858c0-0.776 0.395-1.462 1.029-1.858A2 2 0 0 1 13 12a2 2 0 0 1-2 2v1a2 2 0 0 0-2 2v1a2 2 0 0 1-2 2 2 2 0 0 0 2 2h5a2 2 0 0 1 2 2 2 2 0 0 0 2-2m-6 9 2-2 4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Gramática</span>
+        </button>
+        <button class="nav-item" data-section="history" aria-label="Historial">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8Zm0-11V4m0 6a1 1 0 1 0-2 0V2m0 6a1 1 0 1 0 2 0V6m-5 4a1 1 0 1 0-2 0V6m0 6a1 1 0 1 0-2 0V6m7 6a1 1 0 1 0-2 0V4m0 6a1 1 0 1 0 2 0V4m0 6a1 1 0 1 0-2 0V4m0 6a1 1 0 1 0 2 0V4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Historial</span>
+        </button>
+        <button class="nav-item" data-section="settings" aria-label="Configuración">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.1 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6h.1A1.7 1.7 0 0 0 10 3.1V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+          <span>Configuración</span>
+        </button>
+      </nav>
+
+      <div class="sidebar__footer">
+        <div class="sidebar__model-select">
+          <label class="sr-only">Modelo</label>
+          <select id="sidebar-model-select" class="sidebar__model-select-input">
+            <option value="">Cargando modelos…</option>
+          </select>
+        </div>
+        <button class="icon-btn" id="btn-new-chat" title="Nueva conversación" aria-label="Nueva conversación">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 2v20M20 12H4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Contenido principal -->
+    <main class="main-content">
+      <!-- Sección de Conversación -->
+      <section class="panel panel--active" id="panel-chat" aria-label="Conversación">
+        <header class="panel__header">
+          <div class="panel__title-group">
+            <h2 class="panel__title">Conversación</h2>
+            <span class="panel__subtitle" id="chat-subtitle">IA local · Ollama</span>
+          </div>
+          <div class="panel__actions">
+            <button class="icon-btn" id="btn-clear-chat" title="Limpiar conversación" aria-label="Limpiar">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m3 0-1 12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+        </header>
+
+        <div class="chat-container">
+          <div class="messages" id="messages" role="log" aria-live="polite" aria-label="Mensajes de la conversación"></div>
+          <div class="typing-indicator" id="typing-indicator" hidden>
+            <div class="typing__bubble">
+              <span class="typing__dot"></span>
+              <span class="typing__dot"></span>
+              <span class="typing__dot"></span>
+            </div>
+          </div>
+          <button class="scroll-bottom" id="scroll-bottom-btn" hidden aria-label="Ir al final">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+
+        <!-- Área de composición -->
+        <div class="composer-zone">
+          <div class="chips" id="chips" role="group" aria-label="Acciones rápidas">
+            <button class="chip" data-action="summarize" title="Resumir">
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M5 6h14M5 11h14M5 16h9" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+              Resumir
+            </button>
+            <button class="chip" data-action="translate" title="Traducir al español">
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M3 6h9M7.5 4v2c0 4-2 7-4.5 8M5 10c1 2.4 3 4.2 5.5 5M12.5 20l4-10 4 10M14 16.6h5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Traducir ES
+            </button>
+            <button class="chip" data-action="explain" title="Explicar selección">
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M9.5 18h5M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.6.5.9 1.2.9 1.9h5.4c0-.7.3-1.4.9-1.9A6 6 0 0 0 12 3Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Explicar
+            </button>
+            <button class="chip" data-action="grammar" title="Corregir gramática">
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M15 17h5l-1.405-1.405A2 2 0 0 1 18 14.148V15a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-0.858c0-0.776 0.395-1.462 1.029-1.858A2 2 0 0 1 13 12a2 2 0 0 1-2 2v1a2 2 0 0 0-2 2v1a2 2 0 0 1-2 2 2 2 0 0 0 2 2h5a2 2 0 0 1 2 2 2 2 0 0 0 2-2m-6 9 2-2 4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Corregir
+            </button>
+          </div>
+
+          <form class="composer" id="composer-form" autocomplete="off">
+            <div class="composer__box">
+              <label class="sr-only" for="prompt-input">Escribe tu mensaje</label>
+              <textarea
+                id="prompt-input"
+                class="composer__input"
+                rows="1"
+                placeholder="Escribe tu mensaje… (Enter envía · Shift+Enter salto de línea)"
+                aria-label="Escribe tu mensaje"
+                spellcheck="true"></textarea>
+
+              <div class="composer__tools">
+                <span class="composer__hint" id="composer-hint">Conectado a Ollama</span>
+                <button type="button" id="btn-stop" class="btn btn--stop" hidden title="Detener generación" aria-label="Detener">
+                  <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="2.4" fill="currentColor"/></svg>
+                  Detener
+                </button>
+                <button type="submit" id="btn-send" class="btn btn--send" title="Enviar mensaje" aria-label="Enviar">
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12h13M12.5 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Dropdown de autocompletado -->
+            <div class="autocomplete-dropdown" id="autocomplete-dropdown" hidden role="listbox" aria-label="Sugerencias">
+              <div class="autocomplete-item" data-index="0" role="option"></div>
+              <div class="autocomplete-item" data-index="1" role="option"></div>
+              <div class="autocomplete-item" data-index="2" role="option"></div>
+            </div>
+          </form>
+        </div>
+
+        <!-- Panel de estadísticas de gramática (tipo Grammarly) -->
+        <section class="grammar-stats" id="grammar-stats" hidden>
+          <div class="grammar-stats__header">
+            <span class="grammar-stats__title">Corrección Gramatical</span>
+            <span class="grammar-stats__score" id="grammar-score">100</span>
+          </div>
+          <div class="grammar-stats__summary" id="grammar-summary">
+            <div class="grammar-stats__summary-item">
+              <span class="grammar-stats__dot grammar-stats__dot--grammar"></span>
+              <span id="grammar-count-grammar">0 gramática</span>
+            </div>
+            <div class="grammar-stats__summary-item">
+              <span class="grammar-stats__dot grammar-stats__dot--spelling"></span>
+              <span id="grammar-count-spelling">0 ortografía</span>
+            </div>
+            <div class="grammar-stats__summary-item">
+              <span class="grammar-stats__dot grammar-stats__dot--clarity"></span>
+              <span id="grammar-count-clarity">0 claridad</span>
+            </div>
+            <div class="grammar-stats__summary-item">
+              <span class="grammar-stats__dot grammar-stats__dot--tone"></span>
+              <span id="grammar-count-tone">0 tono</span>
+            </div>
+          </div>
+          <div class="grammar-stats__list" id="grammar-list"></div>
+          <div class="grammar-stats__empty" id="grammar-empty" style="display:none;">
+            ✨ Sin problemas de redacción detectados
+          </div>
+        </section>
+      </section>
+
+      <!-- Sección de Corrección Gramatical -->
+      <section class="panel" id="panel-grammar" aria-label="Corrección gramatical">
+        <header class="panel__header">
+          <h2 class="panel__title">Corrección Gramatical</h2>
+          <div class="panel__actions">
+            <button class="btn btn--primary" id="btn-check-current" title="Revisar texto actual">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M21 7l-9 4-9-4M9 11l9-4 9 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+              Revisar
+            </button>
+          </div>
+        </header>
+        <div class="grammar-editor">
+          <textarea id="grammar-input" placeholder="Pega tu texto aquí para revisión gramatical…" rows="10"></textarea>
+          <div class="grammar-actions">
+            <button class="btn btn--primary" id="btn-fix-all">Corregir todo</button>
+            <button class="btn btn--ghost" id="btn-clear-grammar">Limpiar</button>
+          </div>
+          <div class="grammar-output" id="grammar-output"></div>
+        </div>
+      </section>
+
+      <!-- Sección de Historial -->
+      <section class="panel" id="panel-history" aria-label="Historial">
+        <header class="panel__header">
+          <h2 class="panel__title">Historial</h2>
+        </header>
+        <div class="history-list" id="history-list">
+          <!-- Conversaciones guardadas -->
+        </div>
+      </section>
+
+      <!-- Sección de Configuración -->
+      <section class="panel" id="panel-settings" aria-label="Configuración">
+        <header class="panel__header">
+          <h2 class="panel__title">Configuración</h2>
+        </header>
+        <div class="settings-container">
+          <div class="settings-group">
+            <h3 class="settings-group__title">Conexión a Ollama</h3>
+            <div class="settings-field">
+              <label class="settings-field__label">URL base</label>
+              <input type="text" id="setting-base-url" placeholder="http://192.168.1.67:11434" class="settings-field__input" />
+            </div>
+            <div class="settings-field">
+              <label class="settings-field__label">Modelo preferido</label>
+              <select id="setting-model" class="settings-field__input">
+                <option value="">Automático</option>
+                <option value="gemma2:2b">gemma2:2b</option>
+                <option value="gemma4:e2b-it-qat">gemma4:e2b-it-qat</option>
+                <option value="qwen3.5:4b">qwen3.5:4b</option>
+                <option value="phi4-mini:3.8b">phi4-mini:3.8b</option>
+              </select>
+            </div>
+            <div class="settings-field settings-field--checkbox">
+              <input type="checkbox" id="setting-grammar-enabled" class="settings-field__checkbox" />
+              <label class="settings-field__label" for="setting-grammar-enabled">Activar corrección gramatical (tipo Grammarly)</label>
+            </div>
+            <div class="settings-field settings-field--checkbox">
+              <input type="checkbox" id="setting-autocomplete-enabled" class="settings-field__checkbox" checked />
+              <label class="settings-field__label" for="setting-autocomplete-enabled">Activar autocompletado por IA</label>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3 class="settings-group__title">Parámetros del Modelo</h3>
+            <div class="settings-field">
+              <label class="settings-field__label">Temperature</label>
+              <input type="range" min="0" max="2" step="0.1" value="0.2" id="setting-temperature" class="settings-field__slider" />
+              <span class="settings-field__value" id="temp-value">0.2</span>
+            </div>
+            <div class="settings-field">
+              <label class="settings-field__label">Contexto (num_ctx)</label>
+              <input type="range" min="1024" max="131072" step="1024" value="8192" id="setting-num-ctx" class="settings-field__slider" />
+              <span class="settings-field__value" id="num-ctx-value">8192</span>
+            </div>
+            <div class="settings-field">
+              <label class="settings-field__label">Timeout (ms)</label>
+              <input type="number" min="0" max="600000" value="30000" id="setting-timeout" class="settings-field__input" />
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3 class="settings-group__title">Interfaz</h3>
+            <div class="settings-field">
+              <label class="settings-field__label">Tema</label>
+              <select id="setting-theme" class="settings-field__input">
+                <option value="dark">Oscuro</option>
+                <option value="oled">OLED</option>
+                <option value="light">Claro</option>
+              </select>
+            </div>
+            <div class="settings-field settings-field--checkbox">
+              <input type="checkbox" id="setting-minimize-tray" class="settings-field__checkbox" checked />
+              <label class="settings-field__label" for="setting-minimize-tray">Minimizar a bandeja del sistema</label>
+            </div>
+            <div class="settings-field settings-field--checkbox">
+              <input type="checkbox" id="setting-auto-start" class="settings-field__checkbox" />
+              <label class="settings-field__label" for="setting-auto-start">Iniciar con el sistema</label>
+            </div>
+          </div>
+
+          <div class="settings-actions">
+            <button class="btn btn--primary" id="btn-save-settings">Guardar configuración</button>
+            <button class="btn btn--ghost" id="btn-reset-settings">Restablecer valores</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Notificaciones -->
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+  <script src="renderer.js" type="module"></script>
+</body>
+</html>

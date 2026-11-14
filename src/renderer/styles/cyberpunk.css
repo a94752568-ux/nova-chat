@@ -1,0 +1,312 @@
+/* ============================================================================
+   Nova Chat — Estilos Cyberpunk adicionales
+   ============================================================================ */
+
+/* Efectos de brillo neon */
+.cyber-glow-cyan {
+  box-shadow: var(--neon-glow-cyan);
+}
+
+.cyber-glow-magenta {
+  box-shadow: var(--neon-glow-magenta);
+}
+
+.cyber-glow-purple {
+  box-shadow: var(--neon-glow-purple);
+}
+
+.cyber-text-glow {
+  text-shadow: var(--neon-text-shadow);
+}
+
+.cyber-border-cyan {
+  border: 1px solid rgba(0, 243, 255, 0.5);
+}
+
+.cyber-border-magenta {
+  border: 1px solid rgba(255, 0, 255, 0.5);
+}
+
+.cyber-border-purple {
+  border: 1px solid rgba(188, 19, 254, 0.5);
+}
+
+/* Animaciones de pulso neon */
+.neon-pulse-cyan {
+  animation: neon-pulse-cyan 2.5s ease-in-out infinite;
+}
+
+.neon-pulse-magenta {
+  animation: neon-pulse-magenta 2.5s ease-in-out infinite;
+}
+
+.neon-pulse-purple {
+  animation: neon-pulse-purple 2.5s ease-in-out infinite;
+}
+
+/* Efecto glitch */
+.glitch-text:hover {
+  animation: glitch 0.3s cubic-bezier(.25, .46, .45, .94) both infinite;
+}
+
+/* Overlay de líneas de escaneo (scanlines) */
+.scanline-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: linear-gradient(
+    rgba(18, 16, 34, 0) 50%,
+    rgba(0, 0, 0, 0.15) 50%,
+    rgba(0, 0, 0, 0.15)
+  );
+  background-size: 100% 4px;
+  opacity: 0.35;
+  mix-blend-mode: overlay;
+  animation: scanline 8s linear infinite;
+}
+
+/* Rejilla de fondo */
+.grid-bg {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -3;
+  background-image:
+    linear-gradient(rgba(0, 243, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 243, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(rgba(188, 19, 254, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(188, 19, 254, 0.02) 1px, transparent 1px);
+  background-size: 40px 40px, 40px 40px, 80px 80px, 80px 80px;
+  animation: grid-move 20s linear infinite;
+  opacity: 0.5;
+}
+
+/* Bordes con gradiente neon */
+.neon-border {
+  position: relative;
+  border-radius: var(--r-md);
+}
+
+.neon-border::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--grad-neon);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* Esquinas HUD para el panel principal */
+.hud-corners {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.hud-corner {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(0, 243, 255, 0.4);
+  box-shadow: var(--neon-glow-cyan);
+  opacity: 0.6;
+}
+
+.hud-corner--top-left {
+  top: 0; left: 0;
+  border-right: none; border-bottom: none;
+}
+
+.hud-corner--top-right {
+  top: 0; right: 0;
+  border-left: none; border-bottom: none;
+}
+
+.hud-corner--bottom-left {
+  bottom: 0; left: 0;
+  border-right: none; border-top: none;
+}
+
+.hud-corner--bottom-right {
+  bottom: 0; right: 0;
+  border-top: none; border-left: none;
+}
+
+/* Indicador de conexión Ollama */
+.connection-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.connection-indicator--connected {
+  background: rgba(52, 211, 153, 0.15);
+  color: var(--ok);
+  border-color: rgba(52, 211, 153, 0.3);
+}
+
+.connection-indicator--disconnected {
+  background: rgba(251, 113, 133, 0.15);
+  color: var(--err);
+  border-color: rgba(251, 113, 133, 0.3);
+}
+
+.connection-indicator--checking {
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--warn);
+  border-color: rgba(251, 191, 36, 0.3);
+}
+
+/* Tema OLED */
+[data-theme="oled"] {
+  --bg-0: #000000;
+  --bg-1: #0a0a0a;
+  --bg-2: #0f0f0f;
+  --surface: #0a0a0a;
+  --surface-2: #111111;
+  --surface-3: #1a1a1a;
+  --text: #e2e8f0;
+  --text-2: #94a3b8;
+  --text-3: #64748b;
+  --border: #1e293b;
+  --border-strong: #334155;
+  --glass: rgba(0, 0, 0, 0.8);
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+  --glow: 0 0 20px rgba(0, 243, 255, 0.1);
+}
+
+/* Tema claro */
+[data-theme="light"] {
+  --bg-0: #f8fafc;
+  --bg-1: #f1f5f9;
+  --bg-2: #e2e8f0;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --surface-3: #e2e8f0;
+  --text: #0f172a;
+  --text-2: #334155;
+  --text-3: #64748b;
+  --border: #cbd5e1;
+  --border-strong: #94a3b8;
+  --glass: rgba(255, 255, 255, 0.8);
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-2: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+  --glow: 0 0 20px rgba(167, 139, 250, 0.1);
+}
+
+/* Botones de acción rápida mejorados */
+.chip--active {
+  background: var(--grad-neon-soft);
+  color: var(--text);
+  border-color: rgba(0, 243, 255, 0.5);
+  box-shadow: var(--neon-glow-cyan);
+}
+
+/* Estados del mensaje */
+.msg__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--text-3);
+  margin-top: 6px;
+}
+
+.msg__model {
+  font-family: var(--font-mono);
+  background: var(--surface);
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+}
+
+.msg__duration {
+  font-family: var(--font-mono);
+}
+
+/* Barra de scroll personalizada para el panel de gramática */
+.grammar-stats__list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.grammar-stats__list::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--r-pill);
+}
+
+/* Efecto de escritura en el input */
+.composer__input:focus {
+  outline: none;
+  caret-color: var(--accent-3);
+}
+
+/* Badge de notificación */
+.notification-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 8px;
+  height: 8px;
+  background: var(--err);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--err);
+  animation: blink 1.2s infinite;
+}
+
+/* Transiciones de panel */
+.panel {
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.panel--active {
+  opacity: 1;
+}
+
+/* Barra lateral colapsable */
+.sidebar--collapsed {
+  width: 60px;
+}
+
+.sidebar--collapsed .sidebar__title,
+.sidebar--collapsed .nav-item span,
+.sidebar--collapsed .sidebar__model-select {
+  display: none;
+}
+
+.sidebar--collapsed .nav-item {
+  justify-content: center;
+  padding: 8px;
+}
+
+.sidebar--collapsed .sidebar__brand {
+  justify-content: center;
+  padding: 16px 8px;
+}
+
+.sidebar--collapsed .sidebar__logo {
+  margin: 0 auto;
+}
+
+/* Efecto de enfoque en campos */
+.input-focus-ring {
+  position: relative;
+}
+
+.input-focus-ring:focus-within {
+  border-color: var(--accent-3);
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.2);
+}
