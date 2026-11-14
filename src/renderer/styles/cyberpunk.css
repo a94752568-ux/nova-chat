@@ -4,10 +4,6 @@
 
 /* ----------------------------------------------------------------------------
    Tokens de color — Tema DARK (por defecto)
-   Antes NO existían: solo había bloques para OLED y light, así que todas las
-   variables (--text, --surface, --border...) quedaban indefinidas con
-   data-theme="dark", el navegador descartaba color: var(--text) y el texto
-   heredaba el negro del sistema sobre el fondo oscuro de la ventana.
    Paleta alineada a la marca: violeta #7c6cf6 / cyan #22d3ee sobre #0b0817.
    ---------------------------------------------------------------------------- */
 :root,
@@ -38,6 +34,258 @@
   --glow: 0 0 20px rgba(124, 108, 246, 0.12);
 
   --neon-text-shadow: 0 0 8px rgba(34, 211, 238, 0.35);
+}
+
+/* ----------------------------------------------------------------------------
+   Tema OLED — negro puro, máximo ahorro en pantallas OLED
+   ---------------------------------------------------------------------------- */
+[data-theme="oled"] {
+  --bg-0: #000000;
+  --bg-1: #0a0a0a;
+  --bg-2: #0f0f0f;
+  --surface: #0a0a0a;
+  --surface-2: #111111;
+  --surface-3: #1a1a1a;
+  --text: #e2e8f0;
+  --text-2: #94a3b8;
+  --text-3: #64748b;
+  --border: #1e293b;
+  --border-strong: #334155;
+  --glass: rgba(0, 0, 0, 0.8);
+  --asst-bubble: #0a0a0a;
+  --user-bubble: rgba(0, 243, 255, 0.08);
+  --user-bubble-border: rgba(0, 243, 255, 0.30);
+  --neon-text-shadow: 0 0 8px rgba(0, 243, 255, 0.30);
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+  --glow: 0 0 20px rgba(0, 243, 255, 0.1);
+}
+
+/* ----------------------------------------------------------------------------
+   Tema claro — superficies blancas, acentos violeta/cyan suavizados
+   ---------------------------------------------------------------------------- */
+[data-theme="light"] {
+  --bg-0: #f8fafc;
+  --bg-1: #f1f5f9;
+  --bg-2: #e2e8f0;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --surface-3: #e2e8f0;
+  --text: #0f172a;
+  --text-2: #334155;
+  --text-3: #64748b;
+  --border: #cbd5e1;
+  --border-strong: #94a3b8;
+  --glass: rgba(255, 255, 255, 0.85);
+  --asst-bubble: #ffffff;
+  --user-bubble: rgba(124, 108, 246, 0.12);
+  --user-bubble-border: rgba(124, 108, 246, 0.35);
+  --neon-text-shadow: none;
+  --shadow-1: 0 1px 3px rgba(15, 23, 42, 0.10);
+  --shadow-2: 0 10px 25px -5px rgba(15, 23, 42, 0.12);
+  --glow: 0 0 20px rgba(124, 108, 246, 0.10);
+  /* En claro el neón fuerte ensucia: glows suaves */
+  --neon-glow-cyan: 0 0 8px rgba(124, 108, 246, 0.25);
+  --neon-glow-magenta: 0 0 8px rgba(124, 108, 246, 0.20);
+  --neon-glow-purple: 0 0 8px rgba(124, 108, 246, 0.20);
+  --grad-neon-soft: linear-gradient(135deg, rgba(124, 108, 246, 0.10), rgba(34, 211, 238, 0.08));
+}
+
+/* ----------------------------------------------------------------------------
+   Tema CYBERPUNK 2077 — Night City: azul noche, amarillo #fcee0a, cyan #00f0ff,
+   rojo #ff003c. Esquinas biseladas (clip-path), títulos con glitch RGB,
+   borde cónico giratorio en el compositor, scanlines y rejilla (via JS).
+   ---------------------------------------------------------------------------- */
+[data-theme="cp2077"] {
+  --bg-0: #050a14;
+  --bg-1: #070e1d;
+  --bg-2: #0a1428;
+
+  --surface: #0c1626;
+  --surface-2: #12203a;
+  --surface-3: #1a2c4e;
+
+  --text: #f5f7fa;
+  --text-2: #9db8d8;
+  --text-3: #5a7396;
+
+  --border: #16305a;
+  --border-strong: #2a4a7f;
+
+  --glass: rgba(5, 10, 20, 0.82);
+
+  --asst-bubble: rgba(12, 22, 38, 0.88);
+  --user-bubble: rgba(0, 240, 255, 0.10);
+  --user-bubble-border: rgba(0, 240, 255, 0.38);
+
+  --accent-1: #fcee0a;
+  --accent-2: #00f0ff;
+  --accent-3: #ff003c;
+  --grad-accent: linear-gradient(135deg, #fcee0a 0%, #00f0ff 100%);
+  --grad-neon: linear-gradient(135deg, #fcee0a 0%, #00f0ff 100%);
+  --grad-neon-soft: linear-gradient(135deg, rgba(252, 238, 10, 0.14), rgba(0, 240, 255, 0.10));
+
+  --neon-cyan: #00f0ff;
+  --neon-magenta: #ff003c;
+  --neon-purple: #fcee0a;
+  --neon-glow-cyan: 0 0 10px rgba(0, 240, 255, 0.55), 0 0 22px rgba(0, 240, 255, 0.30);
+  --neon-glow-magenta: 0 0 10px rgba(255, 0, 60, 0.55), 0 0 22px rgba(255, 0, 60, 0.30);
+  --neon-glow-purple: 0 0 10px rgba(252, 238, 10, 0.45), 0 0 22px rgba(252, 238, 10, 0.22);
+
+  --ok: #05f06a;
+  --warn: #fcee0a;
+  --err: #ff003c;
+  --info: #00f0ff;
+
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.55);
+  --shadow-2: 0 10px 25px -5px rgba(0, 0, 0, 0.65);
+  --glow: 0 0 20px rgba(0, 240, 255, 0.14);
+
+  --neon-text-shadow: 0 0 10px rgba(252, 238, 10, 0.40);
+}
+
+/* --- CP2077: tipografía y glitch en títulos --- */
+[data-theme="cp2077"] .sidebar__title,
+[data-theme="cp2077"] .panel__title {
+  font-family: var(--font-mono);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  animation: cp-glitch 7s infinite;
+}
+
+@keyframes cp-glitch {
+  0%, 89%, 100% {
+    text-shadow: var(--neon-text-shadow);
+    transform: none;
+  }
+  90% {
+    text-shadow: -2px 0 #ff003c, 2px 0 #00f0ff;
+    transform: translateX(-1px) skewX(-2deg);
+  }
+  92% {
+    text-shadow: 2px 0 #ff003c, -2px 0 #00f0ff;
+    transform: translateX(1px) skewX(2deg);
+  }
+  94% {
+    text-shadow: var(--neon-text-shadow);
+    transform: none;
+  }
+}
+
+/* --- CP2077: esquinas biseladas (firma visual del juego) --- */
+[data-theme="cp2077"] .btn--primary,
+[data-theme="cp2077"] .btn--stop,
+[data-theme="cp2077"] .nav-item--active,
+[data-theme="cp2077"] .chip {
+  clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px);
+  border-radius: 0;
+}
+
+[data-theme="cp2077"] .bubble {
+  border-radius: 0;
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+}
+
+[data-theme="cp2077"] .btn--primary {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  animation: cp-flicker 5s infinite;
+}
+
+@keyframes cp-flicker {
+  0%, 91%, 96%, 100% { opacity: 1; }
+  93% { opacity: 0.75; }
+  95% { opacity: 0.9; }
+}
+
+/* --- CP2077: borde cónico giratorio en el compositor --- */
+@property --cp-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+[data-theme="cp2077"] .composer__box {
+  position: relative;
+}
+
+[data-theme="cp2077"] .composer__box::before {
+  content: "";
+  position: absolute;
+  inset: -1.5px;
+  border-radius: var(--r-lg);
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--cp-angle),
+    transparent 0deg,
+    transparent 290deg,
+    #fcee0a 330deg,
+    #00f0ff 359deg,
+    transparent 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: cp-spin 4s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes cp-spin {
+  to { --cp-angle: 360deg; }
+}
+
+/* --- CP2077: detalles de color --- */
+[data-theme="cp2077"] .sidebar__logo {
+  border-color: rgba(252, 238, 10, 0.45);
+  box-shadow: var(--neon-glow-purple);
+}
+
+[data-theme="cp2077"] .nav-item--active {
+  border-left: 3px solid #fcee0a;
+  box-shadow: inset 0 0 18px rgba(0, 240, 255, 0.12);
+}
+
+[data-theme="cp2077"] .typing__dot {
+  background: #fcee0a;
+  box-shadow: 0 0 8px rgba(252, 238, 10, 0.7);
+}
+
+[data-theme="cp2077"] .typing__dot:nth-child(2) {
+  background: #00f0ff;
+  box-shadow: 0 0 8px rgba(0, 240, 255, 0.7);
+}
+
+[data-theme="cp2077"] .typing__dot:nth-child(3) {
+  background: #ff003c;
+  box-shadow: 0 0 8px rgba(255, 0, 60, 0.7);
+}
+
+[data-theme="cp2077"] .btn--send {
+  color: #fcee0a;
+}
+
+[data-theme="cp2077"] .btn--send:hover {
+  color: #00f0ff;
+}
+
+[data-theme="cp2077"] .window-control-btn--minimize:hover {
+  background: rgba(252, 238, 10, 0.15);
+  color: #fcee0a;
+}
+
+[data-theme="cp2077"] .window-control-btn--maximize:hover {
+  background: rgba(0, 240, 255, 0.15);
+  color: #00f0ff;
+}
+
+[data-theme="cp2077"] .composer__box:focus-within {
+  border-color: rgba(252, 238, 10, 0.45);
+  box-shadow: var(--shadow-1), 0 0 22px rgba(252, 238, 10, 0.15);
+}
+
+[data-theme="cp2077"] .caret {
+  background: linear-gradient(135deg, #fcee0a, #00f0ff);
 }
 
 /* Efectos de brillo neon */
@@ -87,7 +335,7 @@
   animation: glitch 0.3s cubic-bezier(.25, .46, .45, .94) both infinite;
 }
 
-/* Overlay de líneas de escaneo (scanlines) */
+/* Overlay de líneas de escaneo (scanlines) — se inyecta via JS en cp2077 */
 .scanline-overlay {
   position: fixed;
   inset: 0;
@@ -104,20 +352,20 @@
   animation: scanline 8s linear infinite;
 }
 
-/* Rejilla de fondo */
+/* Rejilla de fondo — se inyecta via JS en cp2077 */
 .grid-bg {
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: -3;
   background-image:
-    linear-gradient(rgba(0, 243, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 243, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(rgba(188, 19, 254, 0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(188, 19, 254, 0.02) 1px, transparent 1px);
+    linear-gradient(rgba(0, 240, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 240, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(rgba(252, 238, 10, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(252, 238, 10, 0.03) 1px, transparent 1px);
   background-size: 40px 40px, 40px 40px, 80px 80px, 80px 80px;
   animation: grid-move 20s linear infinite;
-  opacity: 0.5;
+  opacity: 0.6;
 }
 
 /* Bordes con gradiente neon */
@@ -206,44 +454,6 @@
   background: rgba(251, 191, 36, 0.15);
   color: var(--warn);
   border-color: rgba(251, 191, 36, 0.3);
-}
-
-/* Tema OLED */
-[data-theme="oled"] {
-  --bg-0: #000000;
-  --bg-1: #0a0a0a;
-  --bg-2: #0f0f0f;
-  --surface: #0a0a0a;
-  --surface-2: #111111;
-  --surface-3: #1a1a1a;
-  --text: #e2e8f0;
-  --text-2: #94a3b8;
-  --text-3: #64748b;
-  --border: #1e293b;
-  --border-strong: #334155;
-  --glass: rgba(0, 0, 0, 0.8);
-  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.3);
-  --shadow-2: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
-  --glow: 0 0 20px rgba(0, 243, 255, 0.1);
-}
-
-/* Tema claro */
-[data-theme="light"] {
-  --bg-0: #f8fafc;
-  --bg-1: #f1f5f9;
-  --bg-2: #e2e8f0;
-  --surface: #ffffff;
-  --surface-2: #f1f5f9;
-  --surface-3: #e2e8f0;
-  --text: #0f172a;
-  --text-2: #334155;
-  --text-3: #64748b;
-  --border: #cbd5e1;
-  --border-strong: #94a3b8;
-  --glass: rgba(255, 255, 255, 0.8);
-  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.1);
-  --shadow-2: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
-  --glow: 0 0 20px rgba(167, 139, 250, 0.1);
 }
 
 /* Botones de acción rápida mejorados */
