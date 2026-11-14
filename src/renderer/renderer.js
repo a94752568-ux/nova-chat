@@ -49,7 +49,7 @@ const dom = {};
 
 function cacheDom() {
   // Título y estado
-  dom.titleSubtitle = $("#title-subtitle");
+  dom.titleSubtitle = $("#chat-subtitle");
   dom.ollamaDot = $("#ollama-dot");
   dom.ollamaText = $("#ollama-text");
 
@@ -138,11 +138,13 @@ async function init() {
   cacheDom();
   setupEventListeners();
   await loadSettings();
-  await loadModels();
-  await checkOllamaStatus();
+  // Sin await: si Ollama tarda o no responde, el resto de la UI sigue viva.
+  // Los timeouts están en main (5s salud/modelos), así que esto resuelve
+  // siempre y actualiza el estado cuando llegue la respuesta.
+  checkOllamaStatus();
+  loadModels();
   await loadConversation();
   applyTheme();
-  updateOllamaStatusUI();
 
   // Verificar Ollama periódicamente
   setInterval(checkOllamaStatus, 90000);
@@ -158,6 +160,16 @@ function setupEventListeners() {
   }
   if (dom.btnClose && window.novaAPI) {
     dom.btnClose.addEventListener("click", () => window.novaAPI.quit());
+  }
+
+  // Clic en el indicador de estado = reintentar conexión y recargar modelos
+  if (dom.btnOllamaStatus) {
+    dom.btnOllamaStatus.addEventListener("click", async () => {
+      if (dom.ollamaDot) dom.ollamaDot.dataset.state = "checking";
+      if (dom.ollamaText) dom.ollamaText.textContent = "Verificando…";
+      const ok = await checkOllamaStatus();
+      if (ok) loadModels();
+    });
   }
 
   // Navegación
@@ -260,12 +272,6 @@ function setupAutocompleteListeners() {
   dom.promptInput.addEventListener("blur", () => {
     setTimeout(hideAutocomplete, 150);
   });
-}
-
-function setupGrammarListeners() {
-  dom.btnCheckCurrent.addEventListener("click", checkGrammarInEditor);
-  dom.btnFixAll.addEventListener("click", fixAllGrammar);
-  dom.btnClearGrammar.addEventListener("click", clearGrammarEditor);
 }
 
 function setupSettingsListeners() {
@@ -417,11 +423,15 @@ async function checkOllamaStatus() {
     if (dom.ollamaDot) dom.ollamaDot.dataset.state = healthy ? "ready" : "error";
     if (dom.ollamaText) dom.ollamaText.textContent = healthy ? "Conectado · Ollama" : "Ollama no disponible";
     if (dom.titleSubtitle) dom.titleSubtitle.textContent = healthy ? "IA local · Ollama" : "Ollama no disponible";
+    if (dom.composerHint && !state.generating) {
+      dom.composerHint.textContent = healthy ? "Conectado a Ollama" : "Sin conexión con Ollama";
+    }
     if (dom.btnOllamaStatus) dom.btnOllamaStatus.classList.toggle("connected", healthy);
     return healthy;
   } catch (error) {
     if (dom.ollamaDot) dom.ollamaDot.dataset.state = "error";
     if (dom.ollamaText) dom.ollamaText.textContent = "Error";
+    if (dom.composerHint && !state.generating) dom.composerHint.textContent = "Sin conexión con Ollama";
     return false;
   }
 }
@@ -435,6 +445,14 @@ async function loadModels() {
     updateModelSelectors(models);
   } catch (error) {
     console.error("[Nova] Error cargando modelos:", error);
+    // Aviso claro en el selector en vez de dejar "Cargando modelos…" eterno
+    if (dom.sidebarModelSelect) {
+      dom.sidebarModelSelect.innerHTML = "";
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "Sin modelos — ¿Ollama está corriendo?";
+      dom.sidebarModelSelect.appendChild(option);
+    }
   }
 }
 
@@ -883,18 +901,6 @@ function navigateAutocomplete(delta) {
 // ============================================================================
 // Gramática (tipo Grammarly)
 // ============================================================================
-function setupGrammarListeners() {
-  if (dom.btnCheckCurrent) {
-    dom.btnCheckCurrent.addEventListener("click", checkGrammarInEditor);
-  }
-  if (dom.btnFixAll) {
-    dom.btnFixAll.addEventListener("click", fixAllGrammar);
-  }
-  if (dom.btnClearGrammar) {
-    dom.btnClearGrammar.addEventListener("click", clearGrammarEditor);
-  }
-}
-
 async function toggleGrammarInPage(enabled) {
   if (enabled) {
     await checkOllamaStatus();
@@ -1153,7 +1159,11 @@ async function handleQuickAction(action) {
 
   dom.promptInput.value = `${prompt}\n\n${text}`;
   autoResizeTextarea();
-  dom.composerForm.dispatchEvent(new Event("submit"));
+  if (typeof dom.composerForm.requestSubmit === "function") {
+    dom.composerForm.requestSubmit();
+  } else {
+    dom.composerForm.dispatchEvent(new Event("submit"));
+  }
 }
 
 // ============================================================================
@@ -1204,9 +1214,6 @@ function switchSection(section) {
   dom.panels.forEach((panel) => {
     panel.classList.toggle("panel--active", panel.id === `panel-${section}`);
   });
-
-  // Actualizar título
-  // (los títulos por sección los maneja cada panel; aquí solo se conmuta)
 
   // Si es gramática, cargar estadísticas
   if (section === "grammar" && state.settings.grammarEnabled) {

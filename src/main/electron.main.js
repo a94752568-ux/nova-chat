@@ -28,7 +28,8 @@ const DEFAULT_SETTINGS = {
   autocompleteEnabled: true,
   theme: "dark",
   autoStart: false,
-  minimizeToTray: true
+  minimizeToTray: true,
+  requestTimeoutMs: 30000
 };
 
 // Los ajustes del usuario sobreviven al reinicio (userData/settings.json)
@@ -57,6 +58,19 @@ function persistSettings() {
   } catch (error) {
     console.error("[Nova] No se pudo guardar settings.json:", error.message);
   }
+}
+
+// ============================================================================
+// Utilidades
+// ============================================================================
+// Rechaza si la promesa no resuelve en ms: sin esto, un Ollama inalcanzable
+// (paquetes descartados) cuelga el health check y la UI queda en "Conectando…"
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(label + ": sin respuesta en " + ms + "ms")), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 // ============================================================================
@@ -93,7 +107,7 @@ function initOllama() {
 async function checkOllamaHealth() {
   if (!ollamaClient) return false;
   try {
-    await ollamaClient.list();
+    await withTimeout(ollamaClient.list(), 5000, "ollama:health");
     return true;
   } catch (error) {
     return false;
@@ -103,7 +117,7 @@ async function checkOllamaHealth() {
 async function listModels() {
   if (!ollamaClient) return [];
   try {
-    const response = await ollamaClient.list();
+    const response = await withTimeout(ollamaClient.list(), 5000, "ollama:models");
     return response.models || [];
   } catch (error) {
     return [];
@@ -281,19 +295,31 @@ function registerIpcHandlers() {
   ipcMain.handle("ollama:models", listModels);
   ipcMain.handle("ollama:chat", async (event, payload) => {
     if (!ollamaClient) throw new Error("Ollama no inicializado");
-    const response = await ollamaClient.chat({
-      model: payload.model || settings.model,
-      messages: payload.messages,
-      stream: false,
-      keep_alive: settings.keepAlive,
-      options: {
-        temperature: payload.temperature ?? settings.temperature,
-        top_p: payload.topP ?? settings.topP,
-        num_ctx: payload.numCtx ?? settings.numCtx,
-        repeat_penalty: payload.repeatPenalty ?? settings.repeatPenalty
-      }
-    });
-    return response;
+    // Timeout configurado (requestTimeoutMs): un servidor colgado no debe
+    // dejar el autocompletado/gramática esperando para siempre.
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      (payload && payload.timeoutMs) || settings.requestTimeoutMs || 30000
+    );
+    try {
+      const response = await ollamaClient.chat({
+        model: payload.model || settings.model,
+        messages: payload.messages,
+        stream: false,
+        keep_alive: settings.keepAlive,
+        signal: controller.signal,
+        options: {
+          temperature: payload.temperature ?? settings.temperature,
+          top_p: payload.topP ?? settings.topP,
+          num_ctx: payload.numCtx ?? settings.numCtx,
+          repeat_penalty: payload.repeatPenalty ?? settings.repeatPenalty
+        }
+      });
+      return response;
+    } finally {
+      clearTimeout(timer);
+    }
   });
 
   // Streaming real: los streams NO son serializables por IPC, así que main
@@ -355,18 +381,22 @@ function registerIpcHandlers() {
   ipcMain.handle("grammar:check", async (event, { text, model }) => {
     if (!ollamaClient) return { ok: false, error: "Ollama no disponible" };
     try {
-      const response = await ollamaClient.chat({
-        model: model || settings.model,
-        stream: false,
-        messages: [
-          {
-            role: "system",
-            content: `Eres un corrector ortográfico y gramatical experto en español. Analiza el texto y detecta problemas de gramática, ortografía, claridad y tono. Responde ÚNICAMENTE con JSON: {"issues": [{"id": "unique-id", "start": numero, "end": numero, "text": "texto", "suggestion": "corrección", "type": "grammar|spelling|clarity|tone", "explanation": "explicación"}]}. Sin texto adicional.`
-          },
-          { role: "user", content: `Analiza: "${text}"` }
-        ],
-        options: { temperature: 0.1 }
-      });
+      const response = await withTimeout(
+        ollamaClient.chat({
+          model: model || settings.model,
+          stream: false,
+          messages: [
+            {
+              role: "system",
+              content: `Eres un corrector ortográfico y gramatical experto en español. Analiza el texto y detecta problemas de gramática, ortografía, claridad y tono. Responde ÚNICAMENTE con JSON: {"issues": [{"id": "unique-id", "start": numero, "end": numero, "text": "texto", "suggestion": "corrección", "type": "grammar|spelling|clarity|tone", "explanation": "explicación"}]}. Sin texto adicional.`
+            },
+            { role: "user", content: `Analiza: "${text}"` }
+          ],
+          options: { temperature: 0.1 }
+        }),
+        settings.requestTimeoutMs || 30000,
+        "grammar:check"
+      );
       const content = response.message.content || "";
       const jsonStart = content.indexOf("{");
       const jsonEnd = content.lastIndexOf("}") + 1;
