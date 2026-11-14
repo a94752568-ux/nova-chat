@@ -16,7 +16,7 @@ const MIN_HEIGHT = 450;
 let mainWindow = null;
 let tray = null;
 let ollamaClient = null;
-let settings = {
+const DEFAULT_SETTINGS = {
   baseUrl: "http://192.168.1.67:11434",
   model: "gemma2:2b",
   temperature: 0.2,
@@ -30,6 +30,34 @@ let settings = {
   autoStart: false,
   minimizeToTray: true
 };
+
+// Los ajustes del usuario sobreviven al reinicio (userData/settings.json)
+let settings = { ...DEFAULT_SETTINGS, ...loadSettingsFromDisk() };
+
+// ============================================================================
+// Persistencia de configuración (userData/settings.json)
+// ============================================================================
+function settingsFile() {
+  return path.join(app.getPath("userData"), "settings.json");
+}
+
+function loadSettingsFromDisk() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(settingsFile(), "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_) {
+    return {}; // primera ejecución: no existe todavía
+  }
+}
+
+function persistSettings() {
+  try {
+    fs.mkdirSync(app.getPath("userData"), { recursive: true });
+    fs.writeFileSync(settingsFile(), JSON.stringify(settings, null, 2), "utf8");
+  } catch (error) {
+    console.error("[Nova] No se pudo guardar settings.json:", error.message);
+  }
+}
 
 // ============================================================================
 // Inicialización de Ollama
@@ -109,10 +137,24 @@ function createMainWindow() {
 // Bandeja del sistema (Tray)
 // ============================================================================
 function createTray() {
-  const iconPath = path.join(__dirname, "../renderer/assets/icon.png");
-  const trayIcon = nativeImage.createFromPath(iconPath);
+  try {
+    const iconPath = path.join(__dirname, "../renderer/assets/icon.png");
+    const trayIcon = nativeImage.createFromPath(iconPath);
 
-  tray = new Tray(trayIcon);
+    // Sin imagen válida, crear la Tray lanza en Linux y tumba la app en "ready".
+    if (trayIcon.isEmpty()) {
+      console.warn("[Nova] Icono de bandeja no encontrado en", iconPath, "- bandeja deshabilitada");
+      tray = null;
+      return;
+    }
+
+    tray = new Tray(trayIcon);
+  } catch (error) {
+    console.error("[Nova] No se pudo crear la bandeja:", error.message);
+    tray = null;
+    return;
+  }
+
   tray.setToolTip("Nova Chat - Asistente IA Local");
 
   const contextMenu = Menu.buildFromTemplate([
@@ -155,7 +197,7 @@ function createTray() {
 // Atajos de teclado globales
 // ============================================================================
 function registerGlobalShortcuts() {
-  globalShortcut.register("CmdOrCtrl+Shift+Space", () => {
+  const registered = globalShortcut.register("CmdOrCtrl+Shift+Space", () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
@@ -164,6 +206,9 @@ function registerGlobalShortcuts() {
       createMainWindow();
     }
   });
+  if (!registered) {
+    console.warn("[Nova] No se pudo registrar Ctrl+Shift+Space (¿otra app lo está usando?)");
+  }
 }
 
 // ============================================================================
@@ -173,11 +218,40 @@ function registerIpcHandlers() {
   // Configuración
   ipcMain.handle("app:get-settings", () => settings);
   ipcMain.handle("app:set-settings", (event, newSettings) => {
+    if (!newSettings || typeof newSettings !== "object") return settings;
     settings = { ...settings, ...newSettings };
+    persistSettings();
     if (newSettings.baseUrl) {
       initOllama();
     }
     return settings;
+  });
+
+  // Historial de conversación (userData/conversations.json)
+  ipcMain.handle("conversations:save", (event, messages) => {
+    try {
+      const data = Array.isArray(messages) ? messages : [];
+      fs.mkdirSync(app.getPath("userData"), { recursive: true });
+      fs.writeFileSync(
+        path.join(app.getPath("userData"), "conversations.json"),
+        JSON.stringify({ messages: data, savedAt: new Date().toISOString() }, null, 2),
+        "utf8"
+      );
+      return { ok: true };
+    } catch (error) {
+      console.error("[Nova] No se pudo guardar la conversación:", error.message);
+      return { ok: false, error: error.message };
+    }
+  });
+  ipcMain.handle("conversations:load", () => {
+    try {
+      const parsed = JSON.parse(
+        fs.readFileSync(path.join(app.getPath("userData"), "conversations.json"), "utf8")
+      );
+      return { ok: true, messages: Array.isArray(parsed.messages) ? parsed.messages : [] };
+    } catch (_) {
+      return { ok: true, messages: [] };
+    }
   });
 
   // Ollama
@@ -200,21 +274,59 @@ function registerIpcHandlers() {
     return response;
   });
 
-  ipcMain.handle("ollama:stream", async (event, payload) => {
+  // Streaming real: los streams NO son serializables por IPC, así que main
+  // itera y reenvía cada fragmento por eventos al renderer que los pidió.
+  const activeStreams = new Map(); // requestId -> AbortController
+
+  ipcMain.handle("ollama:chat-stream", async (event, payload) => {
     if (!ollamaClient) throw new Error("Ollama no inicializado");
-    const stream = await ollamaClient.chat({
-      model: payload.model || settings.model,
-      messages: payload.messages,
-      stream: true,
-      keep_alive: settings.keepAlive,
-      options: {
-        temperature: payload.temperature ?? settings.temperature,
-        top_p: payload.topP ?? settings.topP,
-        num_ctx: payload.numCtx ?? settings.numCtx,
-        repeat_penalty: payload.repeatPenalty ?? settings.repeatPenalty
+    const requestId = payload && payload.requestId;
+    if (!requestId) throw new Error("requestId requerido");
+
+    const sender = event.sender;
+    const send = (channel, data) => {
+      if (!sender.isDestroyed()) sender.send(channel, data);
+    };
+
+    const controller = new AbortController();
+    activeStreams.set(requestId, controller);
+
+    try {
+      const stream = await ollamaClient.chat({
+        model: payload.model || settings.model,
+        messages: payload.messages,
+        stream: true,
+        keep_alive: settings.keepAlive,
+        signal: controller.signal,
+        options: {
+          temperature: payload.temperature ?? settings.temperature,
+          top_p: payload.topP ?? settings.topP,
+          num_ctx: payload.numCtx ?? settings.numCtx,
+          repeat_penalty: payload.repeatPenalty ?? settings.repeatPenalty
+        }
+      });
+      for await (const part of stream) {
+        send("ollama:chunk", { requestId, chunk: part });
+        if (part.done) break;
       }
-    });
-    return stream;
+      send("ollama:done", { requestId });
+      return { ok: true };
+    } catch (error) {
+      if (controller.signal.aborted) {
+        send("ollama:aborted", { requestId });
+        return { ok: false, aborted: true };
+      }
+      send("ollama:error", { requestId, error: error.message });
+      return { ok: false, error: error.message };
+    } finally {
+      activeStreams.delete(requestId);
+    }
+  });
+
+  ipcMain.handle("ollama:abort", (event, requestId) => {
+    const controller = activeStreams.get(requestId);
+    if (controller) controller.abort();
+    return Boolean(controller);
   });
 
   // Gramática (tipo Grammarly)
@@ -248,12 +360,19 @@ function registerIpcHandlers() {
 
   // Sistema
   ipcMain.handle("app:quit", () => app.quit());
-  ipcMain.handle("app:minimize", () => mainWindow.minimize());
+  ipcMain.handle("app:minimize", () => {
+    if (mainWindow) mainWindow.minimize();
+  });
   ipcMain.handle("app:maximize", () => {
+    if (!mainWindow) return;
     if (mainWindow.isMaximized()) mainWindow.unmaximize();
     else mainWindow.maximize();
   });
   ipcMain.handle("shell:openExternal", async (event, url) => {
+    // Solo http(s): nunca file:// ni esquemas raros desde el renderer
+    if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {
+      throw new Error("URL no permitida: solo http/https");
+    }
     await shell.openExternal(url);
   });
 }
