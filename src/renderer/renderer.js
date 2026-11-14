@@ -412,6 +412,20 @@ function updateSettingsUI() {
 
 function applyTheme() {
   document.documentElement.setAttribute("data-theme", state.settings.theme);
+  // Tema Cyberpunk 2077: activa scanlines y rejilla de fondo futurista.
+  // Los overlays son pointer-events: none, no interfieren con la UI.
+  const fxOn = state.settings.theme === "cp2077";
+  ["grid-bg", "scanline-overlay"].forEach((cls) => {
+    let el = document.querySelector("." + cls);
+    if (fxOn && !el) {
+      el = document.createElement("div");
+      el.className = cls;
+      el.setAttribute("aria-hidden", "true");
+      document.body.prepend(el);
+    } else if (!fxOn && el) {
+      el.remove();
+    }
+  });
 }
 
 // ============================================================================

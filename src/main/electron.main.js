@@ -12,6 +12,14 @@ const WINDOW_HEIGHT = 750;
 const MIN_WIDTH = 600;
 const MIN_HEIGHT = 450;
 
+// Fondo de la ventana acorde al tema activo (evita flash del color equivocado)
+const BG_BY_THEME = {
+  dark: "#0b0817",
+  cp2077: "#050a14",
+  oled: "#000000",
+  light: "#f8fafc"
+};
+
 // Estado de la aplicación
 let mainWindow = null;
 let tray = null;
@@ -135,7 +143,7 @@ function createMainWindow() {
     minHeight: MIN_HEIGHT,
     show: false,
     frame: false,
-    backgroundColor: "#0f172a",
+    backgroundColor: BG_BY_THEME[settings.theme] || "#0b0817",
     icon: loadAppIcon() || undefined,
     webPreferences: {
       nodeIntegration: false,
