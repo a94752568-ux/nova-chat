@@ -79,119 +79,102 @@ body {
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
+  /* NUNCA drag en todo el body: -webkit-app-region se hereda y convierte
+     cada botón/input/textarea en asa de arrastre; en Linux los clicks no
+     llegan y la app entera parece decorativa. Drag solo en franjas claras. */
+  -webkit-app-region: no-drag;
+}
+
+/* Zonas de arrastre de la ventana: cabeceras de panel y marca del sidebar */
+.panel__header,
+.sidebar__brand {
   -webkit-app-region: drag;
 }
 
+/* Lo interactivo jamás arrastra, aunque esté dentro de una zona drag */
+button,
+input,
+textarea,
+select,
+label,
+.window-controls,
+.window-control-btn {
+  -webkit-app-region: no-drag;
+}
+
 /* ============================================================================
-   Ventana de control premium
+   Ventana de control premium (titlebar flush a la esquina)
    ============================================================================ */
 .window-controls {
   position: fixed;
-  top: 20px;
-  right: 20px;
+  top: 0;
+  right: 0;
   display: flex;
-  gap: 12px;
+  align-items: center;
+  gap: 0;
+  height: 40px;
   z-index: 1000;
   -webkit-app-region: no-drag;
 }
 
 .window-control-btn {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border: none;
-  border-radius: var(--r-md);
-  background: var(--surface);
+  border-radius: 0;
+  background: transparent;
   color: var(--text-2);
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--dur) var(--ease);
-  position: relative;
-  overflow: hidden;
-  box-shadow: var(--shadow-1);
-}
-
-.window-control-btn::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: var(--grad-accent);
-  opacity: 0;
-  transition: opacity var(--dur) var(--ease);
-  border-radius: var(--r-md);
-  z-index: -1;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  -webkit-app-region: no-drag;
 }
 
 .window-control-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-2), var(--neon-glow-cyan);
-}
-
-.window-control-btn:hover::before {
-  opacity: 0.15;
+  background: var(--surface-2);
+  color: var(--text);
 }
 
 .window-control-btn:active {
-  transform: translateY(0) scale(0.95);
+  background: var(--surface-3);
 }
 
 .window-control-btn--minimize:hover {
-  background: rgba(251, 191, 36, 0.15);
+  background: rgba(251, 191, 36, 0.18);
   color: var(--warn);
-  border: 1px solid rgba(251, 191, 36, 0.3);
 }
-
-.window-control-btn--minimize:hover { animation: neon-pulse-yellow 2s ease-in-out infinite; }
 
 .window-control-btn--maximize:hover {
-  background: rgba(96, 165, 250, 0.15);
+  background: rgba(96, 165, 250, 0.18);
   color: var(--info);
-  border: 1px solid rgba(96, 165, 250, 0.3);
 }
 
-.window-control-btn--maximize:hover { animation: neon-pulse-blue 2s ease-in-out infinite; }
+/* Cerrar: pegado al borde, rojo sólido al hover (estilo titlebar nativo) */
+.window-control-btn--close {
+  width: 46px;
+}
 
 .window-control-btn--close:hover {
-  background: rgba(251, 113, 133, 0.15);
-  color: var(--err);
-  border: 1px solid rgba(251, 113, 133, 0.3);
-}
-
-.window-control-btn--close:hover { animation: neon-pulse-red 2s ease-in-out infinite; }
-
-@keyframes neon-pulse-yellow {
-  0%, 100% { box-shadow: 0 0 10px rgba(251, 191, 36, 0.4), 0 0 20px rgba(251, 191, 36, 0.2); }
-  50% { box-shadow: 0 0 20px rgba(251, 191, 36, 0.8), 0 0 40px rgba(251, 191, 36, 0.4); }
-}
-
-@keyframes neon-pulse-blue {
-  0%, 100% { box-shadow: 0 0 10px rgba(96, 165, 250, 0.4), 0 0 20px rgba(96, 165, 250, 0.2); }
-  50% { box-shadow: 0 0 20px rgba(96, 165, 250, 0.8), 0 0 40px rgba(96, 165, 250, 0.4); }
-}
-
-@keyframes neon-pulse-red {
-  0%, 100% { box-shadow: 0 0 10px rgba(251, 113, 133, 0.4), 0 0 20px rgba(251, 113, 133, 0.2); }
-  50% { box-shadow: 0 0 20px rgba(251, 113, 133, 0.8), 0 0 40px rgba(251, 113, 133, 0.4); }
+  background: #e81123;
+  color: #ffffff;
 }
 
 .window-control-btn--settings:hover,
 .window-control-btn--ollama-status:hover {
   background: var(--surface-2);
-  border: 1px solid var(--border-strong);
   color: var(--text);
 }
 
 .window-control-btn--ollama-status {
   gap: 6px;
-  padding: 0 10px;
+  padding: 0 12px;
   width: auto;
-  justify-content: center;
+  margin-right: 6px;
+  cursor: pointer;
 }
 
 .status-dot {
@@ -228,26 +211,13 @@ body {
   color: var(--text);
 }
 
-.status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--text-3);
-  box-shadow: 0 0 0 0 currentColor;
-}
-
-.status-dot[data-state="ready"] { background: var(--ok); animation: neon-pulse-green 2.5s ease-in-out infinite; }
-.status-dot[data-state="checking"] { background: var(--warn); animation: neon-pulse-magenta 1.4s ease-in-out infinite; }
-.status-dot[data-state="error"] { background: var(--err); }
-.status-dot[data-state="offline"] { background: var(--err); }
-
 /* ============================================================================
    Layout principal
    ============================================================================ */
 .app {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--header-h));
+  height: 100vh;
   position: relative;
 }
 
@@ -561,8 +531,6 @@ body {
   animation: neon-pulse-cyan 3s ease-in-out infinite;
 }
 
-.scroll-bottom[hidden] { display: none !important; }
-
 /* ============================================================================
    Compositor
    ============================================================================ */
@@ -700,8 +668,6 @@ body {
   animation: msgIn var(--dur) var(--ease) both;
 }
 
-.autocomplete-dropdown[hidden] { display: none !important; }
-
 .autocomplete-item {
   display: flex;
   align-items: center;
@@ -744,8 +710,6 @@ body {
   box-shadow: var(--shadow-1);
   animation: msgIn var(--dur) var(--ease) both;
 }
-
-.grammar-stats[hidden] { display: none !important; }
 
 .grammar-stats__header {
   display: flex;
@@ -1092,6 +1056,13 @@ body {
 /* ============================================================================
    Utilidades
    ============================================================================ */
+/* El atributo hidden SIEMPRE gana: sin esto, el display de clases como
+   .btn o .typing-indicator pisa [hidden] y se ven estados fantasma
+   (botón Detener y puntitos de escritura sin haber generado nada). */
+[hidden] {
+  display: none !important;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -1138,31 +1109,6 @@ body {
   100% { transform: translateY(100%); }
 }
 
-/* Fondo cyberpunk */
-.app::before,
-.app::after {
-  content: "";
-  position: absolute;
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(0, 243, 255, 0.4);
-  box-shadow: var(--neon-glow-cyan);
-  pointer-events: none;
-  z-index: 100;
-  opacity: 0.6;
-}
-
-@keyframes neon-pulse-yellow {
-  0%, 100% { box-shadow: 0 0 10px rgba(251, 191, 36, 0.4), 0 0 20px rgba(251, 191, 36, 0.2); }
-  50% { box-shadow: 0 0 20px rgba(251, 191, 36, 0.8), 0 0 40px rgba(251, 191, 36, 0.4); }
-}
-
-@keyframes neon-pulse-blue {
-  0%, 100% { box-shadow: 0 0 10px rgba(96, 165, 250, 0.4), 0 0 20px rgba(96, 165, 250, 0.2); }
-  50% { box-shadow: 0 0 20px rgba(96, 165, 250, 0.8), 0 0 40px rgba(96, 165, 250, 0.4); }
-}
-
-@keyframes neon-pulse-red {
-  0%, 100% { box-shadow: 0 0 10px rgba(251, 113, 133, 0.4), 0 0 20px rgba(251, 113, 133, 0.2); }
-  50% { box-shadow: 0 0 20px rgba(251, 113, 133, 0.8), 0 0 40px rgba(251, 113, 133, 0.4); }
-}
+/* Nota: se eliminaron los pseudo-elementos .app::before/::after (cuadros HUD
+   sin posición explícita): renderizaban un cuadro negro flotante en la
+   esquina superior izquierda de la ventana. */
