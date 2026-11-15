@@ -216,7 +216,10 @@ label,
    ============================================================================ */
 .app {
   display: flex;
-  flex-direction: column;
+  /* ROW obligatorio: sidebar a la IZQUIERDA a todo lo alto. Con "column"
+     el sidebar quedaba apilado arriba como franja y el chat aplastado debajo,
+     desperdiciando todo el ancho derecho (captura del 2026-11-14). */
+  flex-direction: row;
   height: 100vh;
   position: relative;
 }
@@ -331,6 +334,9 @@ label,
   flex-direction: column;
   overflow: hidden;
   position: relative;
+  /* Franja de la titlebar: los controles de ventana son fixed (40px) y
+     sin este padding pisarian el encabezado del panel activo. */
+  padding-top: 40px;
 }
 
 /* ============================================================================
@@ -390,6 +396,7 @@ label,
 
 .messages {
   flex: 1;
+  min-height: 0; /* sin esto, un flex child puede negarse a encoger y el scroll no aparece */
   overflow-y: auto;
   overflow-x: hidden;
   padding: 20px 16px 24px;
