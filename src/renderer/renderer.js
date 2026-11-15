@@ -644,6 +644,14 @@ async function handleSendMessage(event) {
     return;
   }
 
+  // Habilidades locales: "estado del sistema", hora, fecha... respuestas
+  // deterministas con datos reales, sin gastar al modelo.
+  const localSkill = await tryLocalSkill(text);
+  if (localSkill) {
+    addLocalMessage(localSkill);
+    return;
+  }
+
   // Ocultar autocompletado
   hideAutocomplete();
 
@@ -1306,6 +1314,113 @@ async function deleteNoteById(id) {
 }
 
 // ----------------------------------------------------------------------------
+// Habilidades locales: respuestas deterministas SIN gastar al modelo
+// ----------------------------------------------------------------------------
+
+// Deteccion de intenciones en lenguaje natural (espanol). Si el mensaje
+// pregunta por datos que la app conoce de verdad, se responde al instante
+// con datos reales: el modelo no alucina y no se gasta un token.
+const SKILL_SYSTEM_RE = /(estado|status|salud|informe|diagnostico|como va|como esta|que tal)\s+(el|la|del|de la|de el|de mi)?\s*(sistema|equipo|pc|computadora|computador|maquina|laptop)|(cuanta|cuanto de)\s+(ram|memoria\s+libre|memoria\s+disponible)|memoria ram|uso de (cpu|memoria|ram|disco)|(espacio|capacidad) (libre |disponible )?(en|de) (el |la )?(disco|almacenamiento)|nivel de (bateria|carga)|estado de la bateria|cuanta bateria|uptime|cuanto (lleva|tiempo lleva) (encendida|encendido|abierta|corriendo)/i;
+const SKILL_TIME_RE = /que hora es|hora actual|dime la hora|que horas son/i;
+const SKILL_DATE_RE = /que dia es hoy|fecha de hoy|que fecha es hoy|dime la fecha|en que dia vamos/i;
+
+function formatBytesFriendly(bytes) {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = Number(bytes) || 0;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i++;
+  }
+  return (i === 0 ? String(Math.round(value)) : value.toFixed(1)) + " " + units[i];
+}
+
+function formatUptime(seconds) {
+  const s = Math.floor(Number(seconds) || 0);
+  const days = Math.floor(s / 86400);
+  const hours = Math.floor((s % 86400) / 3600);
+  const minutes = Math.floor((s % 3600) / 60);
+  if (days > 0) return days + "d " + hours + "h";
+  if (hours > 0) return hours + "h " + minutes + "m";
+  return minutes + "m";
+}
+
+// Barra mini con bloques: cargada \u25ae, vacia \u25af
+function miniBar(pct) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  const filled = Math.round((clamped / 100) * 10);
+  return "\u25ae".repeat(filled) + "\u25af".repeat(10 - filled);
+}
+
+// Devuelve el texto del informe o null si el mensaje no es una habilidad.
+async function tryLocalSkill(text) {
+  const t = String(text || "").trim();
+  if (!t) return null;
+
+  if (SKILL_TIME_RE.test(t)) {
+    return "**" + new Date().toLocaleTimeString() + "** — hora local de tu equipo. Sin consultas, sin esperas.";
+  }
+  if (SKILL_DATE_RE.test(t)) {
+    return "**" + new Date().toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" }) + "** — según el reloj de tu equipo.";
+  }
+  if (SKILL_SYSTEM_RE.test(t)) {
+    return buildSystemStatusReport();
+  }
+  return null;
+}
+
+async function buildSystemStatusReport() {
+  let info = null;
+  try {
+    if (window.novaAPI && window.novaAPI.systemInfo) {
+      const result = await window.novaAPI.systemInfo();
+      if (result && result.ok) info = result.info;
+    }
+  } catch (_) {
+    /* sin datos: informe parcial */
+  }
+
+  const lines = ["**Estado del sistema**", ""];
+  if (!info) {
+    lines.push("No pude leer los datos del sistema desde el proceso principal.");
+    return lines.join("\n");
+  }
+
+  lines.push("**Equipo**: " + info.os + " · " + info.arch + " (" + info.platform + ")");
+  lines.push("**CPU**: " + info.cpuModel + " — " + info.cpuCores + " nucleos");
+  const load = Number(info.loadAvg1m) || 0;
+  lines.push("**Carga (1m)**: " + load.toFixed(2) + " " + miniBar(Math.min(100, load * 25)));
+
+  const memPct = info.mem.totalBytes ? Math.round((info.mem.usedBytes / info.mem.totalBytes) * 100) : 0;
+  lines.push(
+    "**RAM**: " + formatBytesFriendly(info.mem.usedBytes) + " / " + formatBytesFriendly(info.mem.totalBytes) +
+    " (" + memPct + "%) " + miniBar(memPct)
+  );
+
+  if (info.disk && info.disk.totalBytes > 0) {
+    const diskPct = Math.round((info.disk.usedBytes / info.disk.totalBytes) * 100);
+    lines.push(
+      "**Disco**: " + formatBytesFriendly(info.disk.usedBytes) + " / " + formatBytesFriendly(info.disk.totalBytes) +
+      " (" + diskPct + "%) " + miniBar(diskPct)
+    );
+  }
+  if (info.battery) {
+    lines.push("**Bateria**: " + info.battery.percent + "% (" + info.battery.status + ") " + miniBar(info.battery.percent));
+  }
+  lines.push("**Encendida**: " + formatUptime(info.uptimeSec));
+
+  lines.push("");
+  lines.push(
+    "**Nova**: modelo `" + (state.selectedModel || state.settings.model || "?") + "`" +
+    " · personalidad " + getPersona().name +
+    " · " + (state.notes ? state.notes.length : 0) + " notas locales" +
+    " · " + state.messages.length + " mensajes en esta conversacion" +
+    (state.generating ? " · generando respuesta ahora mismo" : "")
+  );
+  return lines.join("\n");
+}
+
+// ----------------------------------------------------------------------------
 // Comandos slash
 // ----------------------------------------------------------------------------
 
@@ -1332,7 +1447,7 @@ function personaSummary() {
 }
 
 // Devuelve true si el texto era un comando (ya se manejo aqui, no enviar).
-function handleSlashCommand(raw) {
+async function handleSlashCommand(raw) {
   const text = raw.trim();
   const spaceIndex = text.indexOf(" ");
   const cmd = (spaceIndex === -1 ? text : text.slice(0, spaceIndex)).toLowerCase();
@@ -1344,6 +1459,8 @@ function handleSlashCommand(raw) {
       addLocalMessage([
         "**Comandos disponibles**",
         "- `/api` — estado de la conexion (URL, modelo, temperatura...)",
+        "- `/estado` — informe del sistema (RAM, disco, CPU, bateria)",
+        "- Tambien en lenguaje natural: \"estado del sistema\", \"cuanta ram libre\", \"que hora es\"",
         "- `/persona` — lista personalidades · `/persona directa` — cambia y guarda",
         "- `/modelo` — lista modelos · `/modelo llama3.2` — cambia de modelo",
         "- `/temp 0.7` — cambia la temperatura al vuelo",
@@ -1352,6 +1469,11 @@ function handleSlashCommand(raw) {
         "- `/ayuda` — esta ayuda"
       ].join("\n"));
       return true;
+
+    case "/estado": {
+      addLocalMessage(await buildSystemStatusReport());
+      return true;
+    }
 
     case "/api": {
       const persona = getPersona();
@@ -2360,6 +2482,7 @@ init().catch((error) => {
   console.error("[Nova] init falló:", error);
   toast("Error al iniciar Nova Chat", "error");
 });
+
 
 
 

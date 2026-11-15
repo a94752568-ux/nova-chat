@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, globalShortcut, dialog } = require("electron");
 const path = require("path");
+const os = require("os");
 const fs = require("fs");
 const { Ollama } = require("ollama");
 
@@ -570,6 +571,56 @@ function registerIpcHandlers() {
     }
   });
 
+  // Informe del sistema para las habilidades locales del chat:
+  // RAM, disco, CPU, uptime y bateria (si existe). Todo lectura, nada de riesgo.
+  ipcMain.handle("system:info", async () => {
+    try {
+      const cpus = os.cpus();
+      const totalMem = os.totalmem();
+      const freeMem = os.freemem();
+      let disk = null;
+      try {
+        // fs.statfs: Node >= 18.15 (Electron 28 lo trae)
+        const st = await fs.promises.statfs(app.getPath("userData"));
+        const total = st.blocks * st.bsize;
+        const free = st.bavail * st.bsize;
+        disk = { totalBytes: total, freeBytes: free, usedBytes: total - free };
+      } catch (_) {
+        /* sin dato de disco: se omite en el informe */
+      }
+      let battery = null;
+      try {
+        // Linux: /sys/class/power_supply/BAT0 (portatil de Alberto: existe)
+        const base = "/sys/class/power_supply/BAT0";
+        const percent = parseInt(fs.readFileSync(path.join(base, "capacity"), "utf8"), 10);
+        let status = "?";
+        try {
+          status = fs.readFileSync(path.join(base, "status"), "utf8").trim();
+        } catch (_) { /* sin status */ }
+        if (Number.isFinite(percent)) battery = { percent, status };
+      } catch (_) {
+        /* sin bateria (desktop): se omite en el informe */
+      }
+      return {
+        ok: true,
+        info: {
+          platform: process.platform,
+          os: os.type() + " " + os.release(),
+          arch: os.arch(),
+          cpuModel: cpus.length ? cpus[0].model.trim() : "?",
+          cpuCores: cpus.length,
+          loadAvg1m: os.loadavg()[0],
+          uptimeSec: os.uptime(),
+          mem: { totalBytes: totalMem, usedBytes: totalMem - freeMem, freeBytes: freeMem },
+          disk,
+          battery
+        }
+      };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+
   // Sistema
   ipcMain.handle("app:quit", () => app.quit());
   ipcMain.handle("app:minimize", () => {
@@ -623,5 +674,6 @@ app.on("will-quit", () => {
 });
 
 module.exports = { app, settings, createMainWindow, initOllama };
+
 
 

@@ -81,6 +81,9 @@ contextBridge.exposeInMainWorld("novaAPI", {
   // Exportar conversacion (dialogo nativo de guardado)
   exportMarkdown: (payload) => ipcRenderer.invoke("export:markdown", payload),
 
+  // Informe del sistema (habilidades locales del chat)
+  systemInfo: () => ipcRenderer.invoke("system:info"),
+
   // Sistema
   quit: () => ipcRenderer.invoke("app:quit"),
   minimize: () => ipcRenderer.invoke("app:minimize"),
@@ -104,5 +107,6 @@ contextBridge.exposeInMainWorld("novaAPI", {
     }
   }
 });
+
 
 
