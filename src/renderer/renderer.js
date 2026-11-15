@@ -372,6 +372,9 @@ async function loadSettings() {
     $("#num-ctx-value").textContent = state.settings.numCtx;
 
     state.grammar.enabled = state.settings.grammarEnabled;
+    // Si la gramática estaba activada, mostrar el panel de estadísticas
+    // (antes quedaba oculto hasta que tocaras el checkbox otra vez)
+    if (dom.grammarStats) dom.grammarStats.hidden = !state.grammar.enabled;
 
     // Aplicar tema
     applyTheme();
@@ -629,9 +632,6 @@ async function runChatStream(model, messages) {
     if (fullContent.trim()) {
       assistantMessage.durationMs = Date.now() - assistantMessage.createdAt;
       updateMessageMeta(messageElement, assistantMessage);
-      if (state.settings.grammarEnabled && fullContent.trim().length > 3) {
-        checkGrammarForText(fullContent, assistantMessage.id);
-      }
       dom.composerHint.textContent = "Respuesta generada";
     } else {
       dom.composerHint.textContent = "Sin respuesta del modelo";
@@ -970,12 +970,17 @@ async function requestGrammarCheckForPage() {
   }
 }
 
+let grammarCheckInFlight = false;
+
 async function checkGrammarInEditor() {
   const text = dom.grammarInput.value.trim();
   if (!text) {
     toast("Ingresa texto para revisar", "info");
     return;
   }
+  if (grammarCheckInFlight) return; // sin doble petición por doble clic
+  grammarCheckInFlight = true;
+  if (dom.btnCheckCurrent) dom.btnCheckCurrent.disabled = true;
 
   try {
     const response = await window.novaAPI.checkGrammar({
@@ -983,14 +988,21 @@ async function checkGrammarInEditor() {
       model: state.selectedModel || state.settings.model || ""
     });
 
-    if (response.ok && response.issues) {
+    if (response.ok && Array.isArray(response.issues)) {
       state.grammar.issues = response.issues;
       computeGrammarScore();
       renderGrammarStats();
       displayGrammarIssues(response.issues);
+    } else {
+      // Ollama caído, timeout o error: AVISAR (antes fallaba en silencio
+      // y parecía que el botón no hacía nada)
+      toast("No se pudo revisar: " + ((response && response.error) || "Ollama no disponible"), "error");
     }
   } catch (error) {
     toast("Error al revisar gramática", "error");
+  } finally {
+    grammarCheckInFlight = false;
+    if (dom.btnCheckCurrent) dom.btnCheckCurrent.disabled = false;
   }
 }
 
@@ -1059,23 +1071,6 @@ function clearGrammarEditor() {
   renderGrammarStats();
 }
 
-async function checkGrammarForText(text, messageId) {
-  try {
-    const response = await window.novaAPI.checkGrammar({
-      text,
-      model: state.selectedModel || state.settings.model || ""
-    });
-
-    if (response.ok && response.issues) {
-      // Almacenar issues asociados al mensaje
-      // En una implementación completa, se mostrarían en el mensaje
-      console.log(`[Nova] Issues para mensaje ${messageId}:`, response.issues);
-    }
-  } catch (error) {
-    // Silencioso para no interrumpir el chat
-  }
-}
-
 function computeGrammarScore() {
   const { issues } = state.grammar;
   const total = issues.length;
@@ -1088,7 +1083,7 @@ function computeGrammarScore() {
 
   const counts = { grammar: 0, spelling: 0, clarity: 0, tone: 0 };
   for (const issue of issues) {
-    if (counts[issue.type] !== undefined) counts[issue.type] += 1;
+    // Tipos desconocidos del modelo caen en "grammar" (antes se perdían
   }
   state.grammar.counts = counts;
 
@@ -1137,6 +1132,9 @@ function renderGrammarStats() {
           <span class="grammar-stats__item-text">${escapeHtml(issue.text)}</span>
           <span class="grammar-stats__item-suggestion">→ ${escapeHtml(issue.suggestion || issue.text)}</span>
         `;
+        // Clic en un issue = localizarlo en el texto (como Grammarly)
+        item.style.cursor = "pointer";
+        item.addEventListener("click", () => locateIssue(issue));
         dom.grammarList.appendChild(item);
       }
     }
@@ -1158,16 +1156,48 @@ function displayGrammarIssues(issues) {
     tone: "Tono"
   };
 
-  dom.grammarOutput.innerHTML = issues.map((issue) => {
+  dom.grammarOutput.innerHTML = "";
+  issues.forEach((issue) => {
     const type = safeIssueType(issue);
-    return `
-    <div class="grammar-stats__item grammar-stats__item--${type}">
-      <span class="grammar-stats__item-type grammar-stats__item-type--${type}">${typeLabels[type]}</span>
-      <span class="grammar-stats__item-text">${escapeHtml(issue.text)}</span>
-      <span class="grammar-stats__item-suggestion">→ ${escapeHtml(issue.suggestion || issue.text)}</span>
-    </div>
-  `;
-  }).join("");
+    const item = document.createElement("div");
+    item.className = "grammar-stats__item grammar-stats__item--" + type;
+    item.innerHTML =
+      '<span class="grammar-stats__item-type grammar-stats__item-type--' + type + '">' + typeLabels[type] + '</span>' +
+      '<span class="grammar-stats__item-text">' + escapeHtml(issue.text) + '</span>' +
+      '<span class="grammar-stats__item-suggestion">→ ' + escapeHtml(issue.suggestion || issue.text) + '</span>';
+    // Clic en un issue = localizarlo en el texto (como Grammarly)
+    item.style.cursor = "pointer";
+    item.addEventListener("click", () => locateIssue(issue));
+    dom.grammarOutput.appendChild(item);
+  });
+}
+
+// Localiza un issue en el textarea activo y lo selecciona (como Grammarly).
+// Los índices del modelo son orientativos: se validan antes de usarlos.
+function locateIssue(issue) {
+  if (!issue || !issue.text) return;
+  const targets = [dom.grammarInput, dom.promptInput].filter(Boolean);
+  for (const textarea of targets) {
+    const value = textarea.value;
+    if (!value) continue;
+    let start = Number(issue.start);
+    let end = Number(issue.end);
+    const valid = Number.isInteger(start) && Number.isInteger(end)
+      && start >= 0 && start < end && end <= value.length
+      && value.slice(start, end) === issue.text;
+    if (!valid) {
+      start = value.indexOf(issue.text);
+      end = start === -1 ? -1 : start + issue.text.length;
+    }
+    if (start !== -1) {
+      textarea.focus({ preventScroll: true });
+      textarea.setSelectionRange(start, end);
+      // Aproximar el scroll para que la selección quede a la vista
+      const line = value.slice(0, start).split("\n").length - 1;
+      textarea.scrollTop = Math.max(0, line * 24 - textarea.clientHeight / 2);
+      return;
+    }
+  }
 }
 
 // ============================================================================

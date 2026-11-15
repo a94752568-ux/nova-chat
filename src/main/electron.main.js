@@ -396,7 +396,7 @@ function registerIpcHandlers() {
           messages: [
             {
               role: "system",
-              content: `Eres un corrector ortográfico y gramatical experto en español. Analiza el texto y detecta problemas de gramática, ortografía, claridad y tono. Responde ÚNICAMENTE con JSON: {"issues": [{"id": "unique-id", "start": numero, "end": numero, "text": "texto", "suggestion": "corrección", "type": "grammar|spelling|clarity|tone", "explanation": "explicación"}]}. Sin texto adicional.`
+              content: `Eres un corrector ortográfico y gramatical experto en español. Analiza el texto del usuario y detecta problemas de gramática, ortografía, claridad y tono. Responde ÚNICAMENTE con JSON válido, sin markdown ni texto adicional: {"issues": [{"start": numero, "end": numero, "text": "texto", "suggestion": "corrección", "type": "grammar|spelling|clarity|tone", "explanation": "explicación"}]}. REGLAS: "start" y "end" son índices basados en 0 sobre el texto analizado, SIN contar el prefijo "Analiza:" ni las comillas; "text" debe ser EXACTAMENTE la subcadena del texto original en esa posición; si no hay problemas devuelve {"issues": []}.`
             },
             { role: "user", content: `Analiza: "${text}"` }
           ],
