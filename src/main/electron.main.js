@@ -621,6 +621,44 @@ function registerIpcHandlers() {
     }
   });
 
+  // Informe del SERVIDOR Ollama para las habilidades locales del chat: el
+  // "sistema" que importa es el equipo que sirve los modelos (baseUrl),
+  // no la laptop donde corre Nova. Consulta la API HTTP de Ollama.
+  ipcMain.handle("system:server-info", async () => {
+    const baseUrl = String(settings.baseUrl || "").replace(/\/+$/, "");
+    const started = Date.now();
+    const getJson = async (apiPath) => {
+      const res = await withTimeout(fetch(baseUrl + apiPath), 4000, "Ollama " + apiPath);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    };
+    try {
+      // /api/ps y /api/tags no son vitales: si fallan, el informe sigue en linea
+      const [version, ps, tags] = await Promise.all([
+        getJson("/api/version"),
+        getJson("/api/ps").catch(() => null),
+        getJson("/api/tags").catch(() => null)
+      ]);
+      return {
+        ok: true,
+        online: true,
+        baseUrl,
+        latencyMs: Date.now() - started,
+        version: version && version.version ? version.version : "?",
+        loaded: ps && Array.isArray(ps.models) ? ps.models : [],
+        installed: tags && Array.isArray(tags.models) ? tags.models : []
+      };
+    } catch (error) {
+      return {
+        ok: true,
+        online: false,
+        baseUrl,
+        latencyMs: Date.now() - started,
+        error: error.message
+      };
+    }
+  });
+
   // Sistema
   ipcMain.handle("app:quit", () => app.quit());
   ipcMain.handle("app:minimize", () => {
@@ -674,6 +712,7 @@ app.on("will-quit", () => {
 });
 
 module.exports = { app, settings, createMainWindow, initOllama };
+
 
 
 

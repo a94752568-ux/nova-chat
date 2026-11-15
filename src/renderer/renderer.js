@@ -1323,6 +1323,9 @@ async function deleteNoteById(id) {
 const SKILL_SYSTEM_RE = /(estado|status|salud|informe|diagnostico|como va|como esta|que tal)\s+(el|la|del|de la|de el|de mi)?\s*(sistema|equipo|pc|computadora|computador|maquina|laptop)|(cuanta|cuanto de)\s+(ram|memoria\s+libre|memoria\s+disponible)|memoria ram|uso de (cpu|memoria|ram|disco)|(espacio|capacidad) (libre |disponible )?(en|de) (el |la )?(disco|almacenamiento)|nivel de (bateria|carga)|estado de la bateria|cuanta bateria|uptime|cuanto (lleva|tiempo lleva) (encendida|encendido|abierta|corriendo)/i;
 const SKILL_TIME_RE = /que hora es|hora actual|dime la hora|que horas son/i;
 const SKILL_DATE_RE = /que dia es hoy|fecha de hoy|que fecha es hoy|dime la fecha|en que dia vamos/i;
+// Preguntas sobre el equipo LOCAL de Alberto (laptop): solo si lo nombra
+// explicitamente o pregunta por cosas que solo tiene una laptop (bateria).
+const SKILL_LAPTOP_RE = /(mi|la|de mi)\s+(laptop|portatil|computadora|pc|maquina|equipo)|\blaptop\b|\bportatil\b|bateria|nivel de carga/i;
 
 function formatBytesFriendly(bytes) {
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -1363,13 +1366,85 @@ async function tryLocalSkill(text) {
   if (SKILL_DATE_RE.test(t)) {
     return "**" + new Date().toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" }) + "** — según el reloj de tu equipo.";
   }
+  if (SKILL_LAPTOP_RE.test(t)) {
+    return buildLaptopStatusReport();
+  }
   if (SKILL_SYSTEM_RE.test(t)) {
     return buildSystemStatusReport();
   }
   return null;
 }
 
+// Informe del SERVIDOR Ollama (el equipo que sirve los modelos, ej.
+// http://192.168.1.67:11434): conexion, latencia, version, modelos cargados
+// en VRAM y modelos instalados. Consulta real via IPC, cero tokens.
 async function buildSystemStatusReport() {
+  let info = null;
+  try {
+    if (window.novaAPI && window.novaAPI.serverInfo) {
+      const result = await window.novaAPI.serverInfo();
+      if (result && result.ok) info = result;
+    }
+  } catch (_) {
+    /* sin datos: informe parcial */
+  }
+
+  const lines = ["**Estado del servidor Ollama**", ""];
+  if (!info) {
+    lines.push("No pude consultar el servidor desde el proceso principal.");
+    return lines.join("\n");
+  }
+
+  lines.push("**Servidor**: `" + info.baseUrl + "`");
+  if (!info.online) {
+    lines.push("**Conexion**: OFFLINE (" + info.latencyMs + " ms sin respuesta)");
+    if (info.error) lines.push("**Motivo**: " + info.error);
+    lines.push("");
+    lines.push("Revisa que el equipo este encendido y Ollama corriendo (`ollama serve`).");
+    return lines.join("\n");
+  }
+
+  lines.push("**Conexion**: en linea · " + info.latencyMs + " ms · Ollama v" + info.version);
+
+  const loaded = Array.isArray(info.loaded) ? info.loaded : [];
+  lines.push("");
+  lines.push("**Modelos cargados en memoria**: " + loaded.length);
+  const maxVram = loaded.reduce((max, m) => Math.max(max, Number(m.size_vram) || 0), 0);
+  for (const m of loaded) {
+    const vram = Number(m.size_vram) || 0;
+    const pct = maxVram ? (vram / maxVram) * 100 : 0;
+    let expires = "";
+    if (m.expires_at) {
+      const remainMs = new Date(m.expires_at).getTime() - Date.now();
+      if (remainMs > 0) expires = " · expira en " + formatUptime(remainMs / 1000);
+    }
+    lines.push("- `" + m.name + "` — " + formatBytesFriendly(vram) + " en VRAM " + miniBar(pct) + expires);
+  }
+  if (!loaded.length) {
+    lines.push("- Ninguno ahora mismo (se cargan solos al pedirlos).");
+  }
+
+  const installed = Array.isArray(info.installed) ? info.installed : [];
+  lines.push("");
+  lines.push("**Modelos instalados**: " + installed.length);
+  for (const m of installed) {
+    lines.push("- `" + m.name + "` — " + formatBytesFriendly(Number(m.size) || 0));
+  }
+
+  lines.push("");
+  lines.push(
+    "**Nova**: modelo `" + (state.selectedModel || state.settings.model || "?") + "`" +
+    " · personalidad " + getPersona().name +
+    " · " + (state.notes ? state.notes.length : 0) + " notas locales" +
+    " · " + state.messages.length + " mensajes en esta conversacion" +
+    (state.generating ? " · generando respuesta ahora mismo" : "")
+  );
+  return lines.join("\n");
+}
+
+// Informe del equipo LOCAL (la laptop donde corre Nova): CPU, RAM, disco,
+// bateria y uptime. Se muestra cuando Alberto pregunta por SU equipo.
+async function buildLaptopStatusReport() {
   let info = null;
   try {
     if (window.novaAPI && window.novaAPI.systemInfo) {
@@ -1380,7 +1455,7 @@ async function buildSystemStatusReport() {
     /* sin datos: informe parcial */
   }
 
-  const lines = ["**Estado del sistema**", ""];
+  const lines = ["**Estado de tu laptop**", ""];
   if (!info) {
     lines.push("No pude leer los datos del sistema desde el proceso principal.");
     return lines.join("\n");
@@ -1459,8 +1534,8 @@ async function handleSlashCommand(raw) {
       addLocalMessage([
         "**Comandos disponibles**",
         "- `/api` — estado de la conexion (URL, modelo, temperatura...)",
-        "- `/estado` — informe del sistema (RAM, disco, CPU, bateria)",
-        "- Tambien en lenguaje natural: \"estado del sistema\", \"cuanta ram libre\", \"que hora es\"",
+        "- `/estado` — estado del servidor Ollama (conexion, modelos, VRAM)",
+        "- Tambien en lenguaje natural: \"estado del sistema\", \"estado de mi laptop\", \"que hora es\"",
         "- `/persona` — lista personalidades · `/persona directa` — cambia y guarda",
         "- `/modelo` — lista modelos · `/modelo llama3.2` — cambia de modelo",
         "- `/temp 0.7` — cambia la temperatura al vuelo",
@@ -2482,6 +2557,7 @@ init().catch((error) => {
   console.error("[Nova] init falló:", error);
   toast("Error al iniciar Nova Chat", "error");
 });
+
 
 
 
