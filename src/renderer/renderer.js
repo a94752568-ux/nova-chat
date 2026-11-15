@@ -25,6 +25,7 @@ const state = {
   models: [],
   selectedModel: "",
   messages: [],
+  conversationId: null,
   generating: false,
   activeStreamCancel: null,
   grammar: {
@@ -102,6 +103,9 @@ function cacheDom() {
   dom.verboseLabel = $("#verbose-label");
   dom.verboseDetail = $("#verbose-detail");
 
+  // Historial
+  dom.historyList = $("#history-list");
+
   // Configuración
   dom.settingBaseUrl = $("#setting-base-url");
   dom.settingModel = $("#setting-model");
@@ -149,6 +153,7 @@ async function init() {
   // siempre y actualiza el estado cuando llegue la respuesta.
   checkOllamaStatus();
   loadModels();
+  state.conversationId = "conv_" + Date.now() + "_" + Math.random().toString(36).slice(2, 9);
   await loadConversation();
   applyTheme();
 
@@ -208,9 +213,14 @@ function setupEventListeners() {
     dom.btnClearChat.addEventListener("click", clearChat);
   }
 
-  // Nueva conversación
+  // Nueva conversacion (chat fresco; la anterior ya esta guardada)
   if (dom.btnNewChat) {
-    dom.btnNewChat.addEventListener("click", clearChat);
+    dom.btnNewChat.addEventListener("click", startNewChat);
+  }
+
+  // Acciones de burbuja y bloques de codigo (delegacion)
+  if (dom.messages) {
+    dom.messages.addEventListener("click", handleBubbleActionClick);
   }
 
   // Chips de acción rápida
@@ -662,7 +672,7 @@ async function runChatStream(model, messages) {
         if (chunk && chunk.message && chunk.message.content) {
           fullContent += chunk.message.content;
           assistantMessage.content = fullContent;
-          contentElement.textContent = fullContent;
+          contentElement.innerHTML = renderMarkdown(fullContent);
           scrollToBottom();
           // Verbose en vivo: caracteres recibidos y velocidad
           const elapsed = (Date.now() - assistantMessage.createdAt) / 1000;
@@ -723,8 +733,14 @@ function createMessageElement(message) {
   column.className = "bubble-col";
 
   const bubble = document.createElement("div");
-  bubble.className = "bubble";
-  bubble.textContent = message.content;
+  if (isUser) {
+    bubble.className = "bubble";
+    bubble.textContent = message.content;
+  } else {
+    // Markdown renderizado (escape-first) para respuestas del modelo
+    bubble.className = "bubble bubble--md";
+    bubble.innerHTML = renderMarkdown(message.content);
+  }
 
   const meta = document.createElement("div");
   meta.className = "msg__meta";
@@ -744,8 +760,33 @@ function createMessageElement(message) {
     meta.appendChild(durationSpan);
   }
 
+  const actions = document.createElement("div");
+  actions.className = "bubble-actions";
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "bubble-action";
+  copyBtn.dataset.action = "copy-msg";
+  copyBtn.textContent = "Copiar";
+  actions.appendChild(copyBtn);
+  if (isUser) {
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "bubble-action";
+    editBtn.dataset.action = "edit-msg";
+    editBtn.textContent = "Editar";
+    actions.appendChild(editBtn);
+  } else {
+    const regenBtn = document.createElement("button");
+    regenBtn.type = "button";
+    regenBtn.className = "bubble-action";
+    regenBtn.dataset.action = "regen-msg";
+    regenBtn.textContent = "Regenerar";
+    actions.appendChild(regenBtn);
+  }
+
   column.appendChild(bubble);
   column.appendChild(meta);
+  column.appendChild(actions);
   article.appendChild(avatar);
   article.appendChild(column);
 
@@ -793,14 +834,254 @@ function stopGeneration() {
 }
 
 function clearChat() {
+  if (!state.messages.length) return;
   if (!confirm("¿Estás seguro de que quieres limpiar la conversación?")) return;
   state.messages = [];
   dom.messages.innerHTML = "";
-  saveConversation();
+  // La conversacion limpiada tambien sale del historial
+  if (window.novaAPI && window.novaAPI.deleteConversation && state.conversationId) {
+    window.novaAPI.deleteConversation(state.conversationId).catch(function () {});
+  }
 }
 
 function scrollToBottom() {
   dom.messages.scrollTop = dom.messages.scrollHeight;
+}
+
+// ============================================================================
+// Markdown ligero para respuestas del modelo (escape-first: el contenido del
+// modelo NUNCA se inyecta como HTML sin escapar) + acciones de burbuja.
+// ============================================================================
+
+// Una sola pasada de tokens: strings, comentarios, keywords y numeros.
+// Asi ningun reemplazo cae dentro del HTML insertado por el anterior.
+const CODE_TOKEN_RE = new RegExp(
+  "(\"[^\"\\n]*\"|'[^'\\n]*')" +
+  "|(//[^\\n]*|/\\*[\\s\\S]*?\\*/)" +
+  "|\\b(function|return|if|else|elif|for|while|const|let|var|class|import|from|export|def|new|in|of|true|false|null|undefined|None|True|False|async|await|try|catch|except|finally|switch|case|break|continue|print|echo|public|private|static|void|int|float|bool|this|self|super|extends|implements|interface|enum)\\b" +
+  "|\\b(\\d+(?:\\.\\d+)?)\\b",
+  "g"
+);
+
+function highlightCode(code) {
+  return escapeHtml(code).replace(CODE_TOKEN_RE, function (m, str, com, kw, num) {
+    if (str) return '<span class="tok-str">' + str + "</span>";
+    if (com) return '<span class="tok-com">' + com + "</span>";
+    if (kw) return '<span class="tok-kw">' + kw + "</span>";
+    if (num) return '<span class="tok-num">' + num + "</span>";
+    return m;
+  });
+}
+
+function codeBlockHtml(block) {
+  if (!block) return "";
+  const lang = block.lang ? escapeHtml(block.lang) : "";
+  return (
+    '<div class="md-codeblock"><div class="md-codeblock__bar">' +
+    '<span class="md-codeblock__lang">' + lang + "</span>" +
+    '<button type="button" class="md-copy" data-action="copy-code" title="Copiar codigo">Copiar</button>' +
+    "</div><pre><code>" + highlightCode(block.code) + "</code></pre></div>"
+  );
+}
+
+function renderMarkdown(raw) {
+  if (!raw) return "";
+  const blocks = [];
+  // 1) Bloques de codigo cercados -> placeholders antes de escapar
+  let text = String(raw).replace(/```([A-Za-z0-9_+-]*)\r?\n?([\s\S]*?)```/g, function (m, lang, code) {
+    blocks.push({ lang: lang || "", code: code.replace(/\r/g, "").replace(/\n$/, "") });
+    return "\x01CB" + (blocks.length - 1) + "\x01";
+  });
+  // 2) Escapar TODO el resto (el modelo no puede inyectar HTML)
+  text = escapeHtml(text);
+  // 3) Inline: codigo, negritas, italicas y enlaces (solo http/https)
+  text = text
+    .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,;:!?]|$)/g, "$1<em>$2</em>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s"'<>]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  // 4) Estructura por lineas: titulos, listas, separadores, parrafos
+  const lines = text.split("\n");
+  const out = [];
+  let list = null;
+  let para = [];
+  const closeList = function () { if (list) { out.push("</" + list + ">"); list = null; } };
+  const closePara = function () { if (para.length) { out.push("<p>" + para.join("<br>") + "</p>"); para = []; } };
+  for (const line of lines) {
+    const t = line.trim();
+    const cb = t.match(/^\x01CB(\d+)\x01$/);
+    const h = t.match(/^(#{1,4})\s+(.*)$/);
+    const ul = t.match(/^[-*+]\s+(.*)$/);
+    const ol = t.match(/^\d+[.)]\s+(.*)$/);
+    if (cb) { closePara(); closeList(); out.push(codeBlockHtml(blocks[Number(cb[1])])); continue; }
+    if (!t) { closePara(); closeList(); continue; }
+    if (h) { closePara(); closeList(); const lvl = Math.min(h[1].length + 2, 6); out.push("<h" + lvl + ">" + h[2] + "</h" + lvl + ">"); continue; }
+    if (ul) { closePara(); if (list !== "ul") { closeList(); out.push("<ul>"); list = "ul"; } out.push("<li>" + ul[1] + "</li>"); continue; }
+    if (ol) { closePara(); if (list !== "ol") { closeList(); out.push("<ol>"); list = "ol"; } out.push("<li>" + ol[1] + "</li>"); continue; }
+    if (/^(-{3,}|\*{3,})$/.test(t)) { closePara(); closeList(); out.push("<hr>"); continue; }
+    para.push(t);
+  }
+  closePara();
+  closeList();
+  text = out.join("");
+  // 5) Placeholders que quedaron a mitad de linea
+  text = text.replace(/\x01CB(\d+)\x01/g, function (m, i) {
+    return codeBlockHtml(blocks[Number(i)] || { lang: "", code: "" });
+  });
+  return text;
+}
+
+// Acciones de burbuja y bloques de codigo (delegacion en #messages)
+function handleBubbleActionClick(event) {
+  const btn = event.target.closest("[data-action]");
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const article = btn.closest(".msg");
+  const messageId = article ? article.dataset.id : null;
+  if (action === "copy-msg" && messageId) {
+    const message = state.messages.find(function (m) { return m.id === messageId; });
+    if (message) copyText(message.content);
+  } else if (action === "copy-code") {
+    const wrap = btn.closest(".md-codeblock");
+    const code = wrap ? wrap.querySelector("code") : null;
+    if (code) copyText(code.textContent);
+  } else if (action === "regen-msg" && messageId) {
+    regenerateMessage(messageId);
+  } else if (action === "edit-msg" && messageId) {
+    editMessage(messageId);
+  }
+}
+
+function copyText(text) {
+  const done = function () { toast("Copiado al portapapeles", "ok"); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(function () { fallbackCopy(text, done); });
+  } else {
+    fallbackCopy(text, done);
+  }
+}
+
+function fallbackCopy(text, done) {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+    done();
+  } catch (_) {
+    toast("No se pudo copiar", "error");
+  }
+}
+
+// Regenerar: descarta esta respuesta (y todo lo posterior) y vuelve a pedirle
+// al modelo con el mismo contexto.
+function regenerateMessage(messageId) {
+  if (state.generating) return;
+  const index = state.messages.findIndex(function (m) { return m.id === messageId; });
+  if (index === -1) return;
+  const removed = state.messages.splice(index);
+  removed.forEach(function (m) {
+    const el = dom.messages.querySelector('.msg[data-id="' + m.id + '"]');
+    if (el) el.remove();
+  });
+  const model = state.selectedModel || state.settings.model || "";
+  showTyping();
+  dom.composerHint.textContent = "Generando respuesta...";
+  const messages = state.messages.slice(-10).map(function (m) {
+    return { role: m.role, content: m.content };
+  });
+  runChatStream(model, messages).catch(function (error) {
+    console.error("[Nova] Error al regenerar:", error);
+    hideTyping();
+    toast("Error al conectar con Ollama", "error");
+  });
+}
+
+// Editar: devuelve el texto al compositor y trunca la conversacion desde ese
+// mensaje; el reenvio lo hace el usuario con Enter (flujo tipo ChatGPT).
+function editMessage(messageId) {
+  if (state.generating) return;
+  const index = state.messages.findIndex(function (m) { return m.id === messageId; });
+  if (index === -1) return;
+  dom.promptInput.value = state.messages[index].content;
+  autoResizeTextarea();
+  const removed = state.messages.splice(index);
+  removed.forEach(function (m) {
+    const el = dom.messages.querySelector('.msg[data-id="' + m.id + '"]');
+    if (el) el.remove();
+  });
+  dom.promptInput.focus({ preventScroll: true });
+  saveConversation();
+}
+
+// Nueva conversacion: chat fresco; la anterior ya quedo guardada.
+function startNewChat() {
+  state.conversationId = "conv_" + Date.now() + "_" + Math.random().toString(36).slice(2, 9);
+  state.messages = [];
+  dom.messages.innerHTML = "";
+  dom.composerHint.textContent = "Nueva conversacion";
+  dom.promptInput.focus({ preventScroll: true });
+}
+
+// Panel Historial: lista de conversaciones guardadas (se refresca al abrir).
+async function renderHistory() {
+  if (!dom.historyList || !window.novaAPI || !window.novaAPI.listConversations) return;
+  dom.historyList.innerHTML = '<div class="history-empty">Cargando...</div>';
+  try {
+    const result = await window.novaAPI.listConversations();
+    const conversations = (result && result.conversations) || [];
+    dom.historyList.innerHTML = "";
+    if (!conversations.length) {
+      dom.historyList.innerHTML = '<div class="history-empty">Aun no hay conversaciones guardadas</div>';
+      return;
+    }
+    conversations.forEach(function (conv) {
+      const item = document.createElement("div");
+      item.className = "history-item";
+      const main = document.createElement("button");
+      main.type = "button";
+      main.className = "history-item__main";
+      const title = document.createElement("span");
+      title.className = "history-item__title";
+      title.textContent = conv.title || "Conversacion";
+      const sub = document.createElement("span");
+      sub.className = "history-item__sub";
+      const when = conv.updatedAt ? new Date(conv.updatedAt).toLocaleString() : "";
+      sub.textContent = (conv.count || 0) + " mensajes - " + when;
+      main.appendChild(title);
+      main.appendChild(sub);
+      main.addEventListener("click", async function () {
+        if (state.generating) { toast("Espera a que termine la generacion", "info"); return; }
+        await loadConversation(conv.id);
+        switchSection("chat");
+      });
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "history-item__delete";
+      del.innerHTML = "&times;";
+      del.title = "Eliminar conversacion";
+      del.setAttribute("aria-label", "Eliminar conversacion");
+      del.addEventListener("click", async function (e) {
+        e.stopPropagation();
+        try { await window.novaAPI.deleteConversation(conv.id); } catch (_) {}
+        if (state.conversationId === conv.id) {
+          state.conversationId = null;
+          state.messages = [];
+          dom.messages.innerHTML = "";
+        }
+        renderHistory();
+      });
+      item.appendChild(main);
+      item.appendChild(del);
+      dom.historyList.appendChild(item);
+    });
+  } catch (_) {
+    dom.historyList.innerHTML = '<div class="history-empty">No se pudo cargar el historial</div>';
+  }
 }
 
 // ============================================================================
@@ -1332,6 +1613,11 @@ function switchSection(section) {
   if (section === "grammar" && state.settings.grammarEnabled) {
     renderGrammarStats();
   }
+
+  // Historial: refrescar la lista cada vez que se abre el panel
+  if (section === "history") {
+    renderHistory();
+  }
 }
 
 // ============================================================================
@@ -1339,19 +1625,24 @@ function switchSection(section) {
 // ============================================================================
 async function saveConversation() {
   if (!window.novaAPI || !window.novaAPI.saveConversation) return;
+  if (!state.messages.length) return; // nada que guardar
   try {
-    await window.novaAPI.saveConversation(state.messages);
+    await window.novaAPI.saveConversation({ id: state.conversationId, messages: state.messages });
   } catch (_) {
     /* silencioso: persistir no debe romper el chat */
   }
 }
 
-async function loadConversation() {
+// Sin id: carga la conversacion mas reciente. Con id: esa exacta.
+async function loadConversation(id) {
   if (!window.novaAPI || !window.novaAPI.loadConversation) return;
   try {
-    const result = await window.novaAPI.loadConversation();
-    if (result && result.ok && Array.isArray(result.messages) && result.messages.length > 0) {
-      state.messages = result.messages;
+    const result = await window.novaAPI.loadConversation(id);
+    const conv = result && result.conversation;
+    if (result && result.ok && conv && Array.isArray(conv.messages) && conv.messages.length > 0) {
+      state.conversationId = conv.id;
+      state.messages = conv.messages;
+      dom.messages.innerHTML = "";
       for (const message of state.messages) {
         dom.messages.appendChild(createMessageElement(message));
       }

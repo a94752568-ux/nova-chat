@@ -63,9 +63,11 @@ contextBridge.exposeInMainWorld("novaAPI", {
     };
   },
 
-  // Historial de conversación
-  saveConversation: (messages) => ipcRenderer.invoke("conversations:save", messages),
-  loadConversation: () => ipcRenderer.invoke("conversations:load"),
+  // Historial de conversaciones
+  saveConversation: (payload) => ipcRenderer.invoke("conversations:save", payload),
+  loadConversation: (id) => ipcRenderer.invoke("conversations:load", id),
+  listConversations: () => ipcRenderer.invoke("conversations:list"),
+  deleteConversation: (id) => ipcRenderer.invoke("conversations:delete", id),
 
   // Gramática (tipo Grammarly)
   checkGrammar: ({ text, model }) =>

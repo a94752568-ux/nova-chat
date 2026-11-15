@@ -271,32 +271,101 @@ function registerIpcHandlers() {
     return settings;
   });
 
-  // Historial de conversación (userData/conversations.json)
-  ipcMain.handle("conversations:save", (event, messages) => {
+  // Historial de conversaciones (userData/conversations.json)
+  // Formato nuevo: [{ id, title, updatedAt, messages: [...] }]. El formato
+  // viejo ({ messages: [...] }) se migra automaticamente al leerlo.
+  const conversationsFile = function () {
+    return path.join(app.getPath("userData"), "conversations.json");
+  };
+  const deriveTitle = function (messages) {
+    const firstUser = (messages || []).find(function (m) { return m && m.role === "user" && m.content; });
+    const clean = String(firstUser ? firstUser.content : "").replace(/\s+/g, " ").trim();
+    if (!clean) return "Conversacion";
+    return clean.length > 48 ? clean.slice(0, 48) + "..." : clean;
+  };
+  const readConversations = function () {
     try {
-      const data = Array.isArray(messages) ? messages : [];
-      fs.mkdirSync(app.getPath("userData"), { recursive: true });
-      fs.writeFileSync(
-        path.join(app.getPath("userData"), "conversations.json"),
-        JSON.stringify({ messages: data, savedAt: new Date().toISOString() }, null, 2),
-        "utf8"
-      );
-      return { ok: true };
+      const parsed = JSON.parse(fs.readFileSync(conversationsFile(), "utf8"));
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && Array.isArray(parsed.messages) && parsed.messages.length) {
+        return [{
+          id: "conv_migrada_" + Date.now(),
+          title: deriveTitle(parsed.messages),
+          updatedAt: parsed.savedAt || new Date().toISOString(),
+          messages: parsed.messages
+        }];
+      }
+      return [];
+    } catch (_) {
+      return [];
+    }
+  };
+  const writeConversations = function (list) {
+    fs.mkdirSync(app.getPath("userData"), { recursive: true });
+    fs.writeFileSync(conversationsFile(), JSON.stringify(list, null, 2), "utf8");
+  };
+
+  ipcMain.handle("conversations:save", (event, payload) => {
+    try {
+      const messages = payload && Array.isArray(payload.messages) ? payload.messages : [];
+      if (!messages.length) return { ok: true };
+      const list = readConversations();
+      const id = (payload && payload.id) || ("conv_" + Date.now());
+      const record = {
+        id,
+        title: deriveTitle(messages),
+        updatedAt: new Date().toISOString(),
+        messages
+      };
+      const existing = list.findIndex(function (c) { return c.id === id; });
+      if (existing >= 0) list[existing] = record;
+      else list.unshift(record);
+      // Cap de 50 conversaciones: el disco no es infinito
+      writeConversations(list.slice(0, 50));
+      return { ok: true, id };
     } catch (error) {
-      console.error("[Nova] No se pudo guardar la conversación:", error.message);
+      console.error("[Nova] No se pudo guardar la conversacion:", error.message);
       return { ok: false, error: error.message };
     }
   });
-  ipcMain.handle("conversations:load", () => {
+  ipcMain.handle("conversations:list", () => {
     try {
-      const parsed = JSON.parse(
-        fs.readFileSync(path.join(app.getPath("userData"), "conversations.json"), "utf8")
-      );
-      return { ok: true, messages: Array.isArray(parsed.messages) ? parsed.messages : [] };
+      const list = readConversations();
+      const conversations = list.map(function (c) {
+        return {
+          id: c.id,
+          title: c.title,
+          updatedAt: c.updatedAt,
+          count: Array.isArray(c.messages) ? c.messages.length : 0
+        };
+      });
+      return { ok: true, conversations };
     } catch (_) {
-      return { ok: true, messages: [] };
+      return { ok: true, conversations: [] };
     }
   });
+  ipcMain.handle("conversations:load", (event, id) => {
+    try {
+      const list = readConversations();
+      if (id) {
+        const conv = list.find(function (c) { return c.id === id; });
+        return conv ? { ok: true, conversation: conv } : { ok: false, error: "No encontrada" };
+      }
+      // Sin id: la mas reciente
+      return list.length ? { ok: true, conversation: list[0] } : { ok: true, conversation: null };
+    } catch (_) {
+      return { ok: true, conversation: null };
+    }
+  });
+  ipcMain.handle("conversations:delete", (event, id) => {
+    try {
+      writeConversations(readConversations().filter(function (c) { return c.id !== id; }));
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+
 
   // Ollama
   ipcMain.handle("ollama:health", checkOllamaHealth);
