@@ -166,6 +166,15 @@
           </form>
         </div>
 
+        <!-- Verbose en tiempo real: actividad de Ollama con barras cyberpunk -->
+        <div class="nova-verbose" id="nova-verbose" hidden aria-live="polite">
+          <div class="nova-verbose__bars" id="verbose-bars" aria-hidden="true"></div>
+          <div class="nova-verbose__info">
+            <span class="nova-verbose__label" id="verbose-label">TRANSMITIENDO</span>
+            <span class="nova-verbose__detail" id="verbose-detail"></span>
+          </div>
+        </div>
+
         <!-- Panel de estadísticas de gramática (tipo Grammarly) -->
         <section class="grammar-stats" id="grammar-stats" hidden>
           <div class="grammar-stats__header">

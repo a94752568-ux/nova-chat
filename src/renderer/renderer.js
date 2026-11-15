@@ -96,6 +96,12 @@ function cacheDom() {
   dom.btnClearGrammar = $("#btn-clear-grammar");
   dom.grammarOutput = $("#grammar-output");
 
+  // Verbose en tiempo real (barras cyberpunk)
+  dom.verbose = $("#nova-verbose");
+  dom.verboseBars = $("#verbose-bars");
+  dom.verboseLabel = $("#verbose-label");
+  dom.verboseDetail = $("#verbose-detail");
+
   // Configuración
   dom.settingBaseUrl = $("#setting-base-url");
   dom.settingModel = $("#setting-model");
@@ -602,6 +608,7 @@ async function runChatStream(model, messages) {
   state.generating = true;
   dom.btnStop.hidden = false;
   dom.btnSend.hidden = true;
+  showVerbose("TRANSMITIENDO · " + model);
 
   const assistantMessage = {
     id: generateId(),
@@ -626,6 +633,7 @@ async function runChatStream(model, messages) {
     state.generating = false;
     state.activeStreamCancel = null;
     hideTyping();
+    hideVerbose();
     dom.btnStop.hidden = true;
     dom.btnSend.hidden = false;
 
@@ -656,6 +664,10 @@ async function runChatStream(model, messages) {
           assistantMessage.content = fullContent;
           contentElement.textContent = fullContent;
           scrollToBottom();
+          // Verbose en vivo: caracteres recibidos y velocidad
+          const elapsed = (Date.now() - assistantMessage.createdAt) / 1000;
+          const cps = elapsed > 0 ? fullContent.length / elapsed : 0;
+          updateVerbose(fullContent.length + " chars · " + cps.toFixed(1) + " ch/s");
         }
       },
       onDone: finish,
@@ -950,6 +962,8 @@ async function toggleGrammarInPage(enabled) {
 async function requestGrammarCheckForPage() {
   if (!state.settings.grammarEnabled) return;
 
+  showVerbose("ESCANEO GRAMATICAL");
+  updateVerbose("consultando al modelo...");
   try {
     // Obtener texto del compositor o del editor de gramática
     const text = dom.promptInput.value || dom.grammarInput.value || "";
@@ -967,6 +981,8 @@ async function requestGrammarCheckForPage() {
     }
   } catch (error) {
     console.error("[Nova] Error checking grammar:", error);
+  } finally {
+    hideVerbose();
   }
 }
 
@@ -981,6 +997,8 @@ async function checkGrammarInEditor() {
   if (grammarCheckInFlight) return; // sin doble petición por doble clic
   grammarCheckInFlight = true;
   if (dom.btnCheckCurrent) dom.btnCheckCurrent.disabled = true;
+  showVerbose("ESCANEO GRAMATICAL");
+  updateVerbose("consultando al modelo...");
 
   try {
     const response = await window.novaAPI.checkGrammar({
@@ -1003,6 +1021,7 @@ async function checkGrammarInEditor() {
   } finally {
     grammarCheckInFlight = false;
     if (dom.btnCheckCurrent) dom.btnCheckCurrent.disabled = false;
+    hideVerbose();
   }
 }
 
@@ -1083,7 +1102,9 @@ function computeGrammarScore() {
 
   const counts = { grammar: 0, spelling: 0, clarity: 0, tone: 0 };
   for (const issue of issues) {
-    // Tipos desconocidos del modelo caen en "grammar" (antes se perdían
+    // Tipos desconocidos del modelo caen en "grammar" (whitelist):
+    // antes bajaban el score sin aparecer en ningun contador
+    counts[safeIssueType(issue)] += 1;
   }
   state.grammar.counts = counts;
 
@@ -1198,6 +1219,38 @@ function locateIssue(issue) {
       return;
     }
   }
+}
+
+// ============================================================================
+// Verbose en tiempo real (equalizer cyberpunk)
+// ============================================================================
+// Muestra actividad de Ollama en vivo: barras animadas + etiqueta + detalle.
+// Las barras se generan una sola vez y reutilizan la animacion CSS.
+const VERBOSE_BAR_COUNT = 16;
+
+function showVerbose(label) {
+  if (!dom.verbose) return;
+  if (dom.verboseBars && dom.verboseBars.childElementCount === 0) {
+    for (let i = 0; i < VERBOSE_BAR_COUNT; i++) {
+      const bar = document.createElement("span");
+      bar.className = "nova-verbose__bar";
+      // Desfase y duracion variables por barra: efecto equalizer organico
+      bar.style.animationDelay = (i * 0.07).toFixed(2) + "s";
+      bar.style.animationDuration = (0.55 + (i % 5) * 0.13).toFixed(2) + "s";
+      dom.verboseBars.appendChild(bar);
+    }
+  }
+  if (dom.verboseLabel) dom.verboseLabel.textContent = label;
+  if (dom.verboseDetail) dom.verboseDetail.textContent = "";
+  dom.verbose.hidden = false;
+}
+
+function updateVerbose(detail) {
+  if (dom.verboseDetail) dom.verboseDetail.textContent = detail;
+}
+
+function hideVerbose() {
+  if (dom.verbose) dom.verbose.hidden = true;
 }
 
 // ============================================================================
