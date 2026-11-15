@@ -16,6 +16,7 @@ const state = {
     numCtx: 8192,
     repeatPenalty: 1.1,
     keepAlive: "30m",
+    persona: "nova",
     grammarEnabled: false,
     autocompleteEnabled: true,
     theme: "dark",
@@ -26,6 +27,7 @@ const state = {
   selectedModel: "",
   messages: [],
   conversationId: null,
+  notes: [],
   generating: false,
   activeStreamCancel: null,
   grammar: {
@@ -105,6 +107,12 @@ function cacheDom() {
 
   // Historial
   dom.historyList = $("#history-list");
+
+  // Poder local
+  dom.settingPersona = $("#setting-persona");
+  dom.noteInput = $("#note-input");
+  dom.btnAddNote = $("#btn-add-note");
+  dom.notesList = $("#notes-list");
 
   // Configuración
   dom.settingBaseUrl = $("#setting-base-url");
@@ -353,6 +361,22 @@ function setupSettingsListeners() {
     state.settings.autoStart = e.target.checked;
   });
 
+  if (dom.settingPersona) {
+    dom.settingPersona.addEventListener("change", (e) => {
+      state.settings.persona = e.target.value;
+    });
+  }
+
+  if (dom.btnAddNote) {
+    dom.btnAddNote.addEventListener("click", addNoteFromInput);
+  }
+  if (dom.notesList) {
+    dom.notesList.addEventListener("click", (e) => {
+      const btn = e.target.closest(".note-item__delete");
+      if (btn && btn.dataset.noteId) deleteNoteById(btn.dataset.noteId);
+    });
+  }
+
   dom.btnSaveSettings.addEventListener("click", saveSettings);
   dom.btnResetSettings.addEventListener("click", resetSettings);
 
@@ -381,6 +405,7 @@ async function loadSettings() {
     dom.settingNumCtx.value = state.settings.numCtx;
     dom.settingTimeout.value = state.settings.requestTimeoutMs || 30000;
     dom.settingTheme.value = state.settings.theme;
+    if (dom.settingPersona) dom.settingPersona.value = state.settings.persona || "nova";
     dom.settingMinimizeTray.checked = state.settings.minimizeToTray;
     dom.settingAutoStart.checked = state.settings.autoStart;
 
@@ -394,6 +419,9 @@ async function loadSettings() {
 
     // Aplicar tema
     applyTheme();
+
+    // Notas locales (RAG ligero)
+    loadNotes();
   } catch (error) {
     console.error("[Nova] Error cargando ajustes:", error);
     toast("Error al cargar la configuración", "error");
@@ -418,6 +446,7 @@ function resetSettings() {
     numCtx: 8192,
     repeatPenalty: 1.1,
     keepAlive: "30m",
+    persona: "nova",
     grammarEnabled: false,
     autocompleteEnabled: true,
     theme: "dark",
@@ -581,6 +610,12 @@ async function handleSendMessage(event) {
   const text = dom.promptInput.value.trim();
   if (!text || state.generating) return;
 
+  // Comandos slash: poder local, nunca llegan al modelo
+  if (text.startsWith("/")) {
+    handleSlashCommand(text);
+    return;
+  }
+
   // Ocultar autocompletado
   hideAutocomplete();
 
@@ -597,10 +632,13 @@ async function handleSendMessage(event) {
     const model = state.selectedModel || state.settings.model || "";
     // addUserMessage ya pusheó el mensaje del usuario a state.messages:
     // NO volver a agregarlo (antes viajaba duplicado a Ollama).
-    const messages = state.messages.slice(-10).map((m) => ({
+    // Los mensajes locales (comandos slash) jamás viajan al modelo.
+    const systemPrompt = buildSystemPrompt(text);
+    const messages = state.messages.slice(-10).filter((m) => !m.local).map((m) => ({
       role: m.role,
       content: m.content
     }));
+    if (systemPrompt) messages.unshift({ role: "system", content: systemPrompt });
 
     await runChatStream(model, messages);
 
@@ -991,9 +1029,14 @@ function regenerateMessage(messageId) {
   const model = state.selectedModel || state.settings.model || "";
   showTyping();
   dom.composerHint.textContent = "Generando respuesta...";
-  const messages = state.messages.slice(-10).map(function (m) {
+  const messages = state.messages.slice(-10).filter(function (m) { return !m.local; }).map(function (m) {
     return { role: m.role, content: m.content };
   });
+  // Regenerar tambien respeta personalidad + notas: el system prompt se
+  // construye a partir del ultimo mensaje del usuario disponible.
+  const lastUser = state.messages.filter(function (m) { return m.role === "user"; }).pop();
+  const systemPrompt = buildSystemPrompt(lastUser ? lastUser.content : "");
+  if (systemPrompt) messages.unshift({ role: "system", content: systemPrompt });
   runChatStream(model, messages).catch(function (error) {
     console.error("[Nova] Error al regenerar:", error);
     hideTyping();
@@ -1081,6 +1124,319 @@ async function renderHistory() {
     });
   } catch (_) {
     dom.historyList.innerHTML = '<div class="history-empty">No se pudo cargar el historial</div>';
+  }
+}
+
+// ============================================================================
+// Poder local: personalidades, notas (RAG ligero) y comandos slash
+// ============================================================================
+
+const PERSONAS = {
+  nova: {
+    name: "Nova",
+    desc: "Asistente cercano y calido",
+    prompt: "Eres Nova, un asistente cercano, calido y directo. Respondes en espanol, con tono amable y claro. Usas markdown cuando ayuda (listas, bloques de codigo)."
+  },
+  directa: {
+    name: "Directa",
+    desc: "Respuestas cortas, sin relleno",
+    prompt: "Eres un asistente extremadamente conciso. Respondes en espanol con lo minimo necesario: sin saludos, sin relleno, sin repetir la pregunta. Si la respuesta cabe en una linea, una linea es."
+  },
+  mentor: {
+    name: "Mentor",
+    desc: "Explica paso a paso",
+    prompt: "Eres un mentor paciente. Explicas paso a paso en espanol, con ejemplos concretos y analogias simples. Al final de una explicacion tecnica sugieres un siguiente ejercicio para practicar."
+  },
+  coder: {
+    name: "Coder",
+    desc: "Tecnico, codigo primero",
+    prompt: "Eres un ingeniero de software senior. Priorizas el codigo: primero el bloque de codigo completo y funcional, despues una explicacion breve en espanol. Senalas errores y casos borde sin rodeos."
+  }
+};
+
+function getPersona() {
+  return PERSONAS[state.settings.persona] || PERSONAS.nova;
+}
+
+// RAG ligero: normaliza texto (minusculas, sin acentos) y lo parte en tokens.
+function tokenizeForRag(text) {
+  return String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ");
+}
+
+// Puntua las notas del usuario contra el mensaje y devuelve las 3 mas
+// relevantes (coincidencia de palabras de 4+ caracteres). Sin embeddings:
+// suficiente para notas personales y cero latencia.
+function buildRagContext(userText) {
+  if (!state.notes || !state.notes.length) return "";
+  const queryTokens = tokenizeForRag(userText).split(/\s+/).filter((t) => t.length >= 4);
+  if (!queryTokens.length) return "";
+  const scored = [];
+  for (const note of state.notes) {
+    const noteTokens = new Set(tokenizeForRag(note.text).split(/\s+/).filter((t) => t.length >= 4));
+    let score = 0;
+    for (const token of queryTokens) {
+      if (noteTokens.has(token)) score += 1;
+    }
+    if (score > 0) scored.push({ note, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored.slice(0, 3).map((s) => s.note);
+  if (!top.length) return "";
+  return top.map((note) => "- " + note.text.slice(0, 400)).join("\n").slice(0, 1500);
+}
+
+// System prompt = personalidad activa + notas relevantes. Null si no hay nada.
+function buildSystemPrompt(userText) {
+  const parts = [];
+  const persona = getPersona();
+  if (persona && persona.prompt) parts.push(persona.prompt);
+  const rag = buildRagContext(userText);
+  if (rag) {
+    parts.push("Contexto de las notas locales del usuario (usalo si es util, sin mencionar que existe):\n" + rag);
+  }
+  return parts.length ? parts.join("\n\n") : null;
+}
+
+// ----------------------------------------------------------------------------
+// Notas locales (RAG ligero)
+// ----------------------------------------------------------------------------
+async function loadNotes() {
+  if (!window.novaAPI || !window.novaAPI.listNotes) return;
+  try {
+    const result = await window.novaAPI.listNotes();
+    state.notes = result && result.ok && Array.isArray(result.notes) ? result.notes : [];
+    renderNotes();
+  } catch (_) {
+    /* silencioso: las notas no deben romper el arranque */
+  }
+}
+
+function renderNotes() {
+  if (!dom.notesList) return;
+  dom.notesList.innerHTML = "";
+  if (!state.notes.length) {
+    const empty = document.createElement("p");
+    empty.className = "notes-empty";
+    empty.textContent = "Sin notas todavia. Guarda datos, estilo o contexto y Nova los usara cuando sean relevantes.";
+    dom.notesList.appendChild(empty);
+    return;
+  }
+  for (const note of state.notes) {
+    const item = document.createElement("div");
+    item.className = "note-item";
+    const text = document.createElement("p");
+    text.className = "note-item__text";
+    text.textContent = note.text;
+    const del = document.createElement("button");
+    del.className = "note-item__delete";
+    del.dataset.noteId = note.id;
+    del.textContent = "\u2715";
+    del.title = "Eliminar nota";
+    item.appendChild(text);
+    item.appendChild(del);
+    dom.notesList.appendChild(item);
+  }
+}
+
+async function addNoteFromInput() {
+  const text = dom.noteInput ? dom.noteInput.value.trim() : "";
+  if (!text) {
+    toast("Escribe el texto de la nota", "error");
+    return;
+  }
+  if (!window.novaAPI || !window.novaAPI.addNote) return;
+  try {
+    const result = await window.novaAPI.addNote(text.slice(0, 2000));
+    if (result && result.ok) {
+      if (dom.noteInput) dom.noteInput.value = "";
+      await loadNotes();
+      toast("Nota guardada", "ok");
+    } else {
+      toast("No se pudo guardar la nota", "error");
+    }
+  } catch (_) {
+    toast("No se pudo guardar la nota", "error");
+  }
+}
+
+async function deleteNoteById(id) {
+  if (!window.novaAPI || !window.novaAPI.deleteNote) return;
+  try {
+    await window.novaAPI.deleteNote(id);
+    await loadNotes();
+  } catch (_) {
+    /* silencioso */
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Comandos slash
+// ----------------------------------------------------------------------------
+
+// Mensaje local: se muestra en el chat pero NUNCA se envia al modelo
+// (handleSendMessage y regenerar filtran los mensajes con local: true).
+function addLocalMessage(text) {
+  const message = {
+    id: generateId(),
+    role: "assistant",
+    content: text,
+    local: true,
+    createdAt: Date.now()
+  };
+  state.messages.push(message);
+  dom.messages.appendChild(createMessageElement(message));
+  scrollToBottom();
+  saveConversation();
+}
+
+function personaSummary() {
+  return Object.keys(PERSONAS)
+    .map((key) => "- **" + key + "** (" + PERSONAS[key].name + "): " + PERSONAS[key].desc)
+    .join("\n");
+}
+
+// Devuelve true si el texto era un comando (ya se manejo aqui, no enviar).
+function handleSlashCommand(raw) {
+  const text = raw.trim();
+  const spaceIndex = text.indexOf(" ");
+  const cmd = (spaceIndex === -1 ? text : text.slice(0, spaceIndex)).toLowerCase();
+  const arg = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1).trim();
+
+  switch (cmd) {
+    case "/ayuda":
+    case "/help":
+      addLocalMessage([
+        "**Comandos disponibles**",
+        "- `/api` — estado de la conexion (URL, modelo, temperatura...)",
+        "- `/persona` — lista personalidades · `/persona directa` — cambia y guarda",
+        "- `/modelo` — lista modelos · `/modelo llama3.2` — cambia de modelo",
+        "- `/temp 0.7` — cambia la temperatura al vuelo",
+        "- `/notas` — lista tus notas locales (RAG)",
+        "- `/nota texto...` — guarda una nota nueva",
+        "- `/ayuda` — esta ayuda"
+      ].join("\n"));
+      return true;
+
+    case "/api": {
+      const persona = getPersona();
+      addLocalMessage([
+        "**Estado de la API local**",
+        "- URL: `" + (state.settings.baseUrl || "(sin definir)") + "`",
+        "- Modelo: `" + (state.selectedModel || state.settings.model || "(ninguno)") + "`",
+        "- Temperatura: `" + state.settings.temperature + "` · top_p: `" + state.settings.topP + "`",
+        "- num_ctx: `" + state.settings.numCtx + "` · keep_alive: `" + (state.settings.keepAlive || "30m") + "`",
+        "- Personalidad: **" + persona.name + " (" + state.settings.persona + ")**",
+        "- Notas locales: **" + (state.notes ? state.notes.length : 0) + "**"
+      ].join("\n"));
+      return true;
+    }
+
+    case "/persona": {
+      if (!arg) {
+        addLocalMessage("**Personalidades disponibles**\n\n" + personaSummary() + "\n\nUsa `/persona <id>` para cambiar.");
+        return true;
+      }
+      const key = arg.toLowerCase();
+      if (!PERSONAS[key]) {
+        addLocalMessage("No conozco la personalidad `" + arg + "`.\n\n" + personaSummary());
+        return true;
+      }
+      state.settings.persona = key;
+      if (dom.settingPersona) dom.settingPersona.value = key;
+      saveSettings();
+      addLocalMessage("Personalidad cambiada a **" + PERSONAS[key].name + "** (" + key + "). Se guarda en tus ajustes.");
+      return true;
+    }
+
+    case "/modelo": {
+      if (!arg) {
+        const list = (state.models || [])
+          .map((m) => "- `" + (typeof m === "string" ? m : (m && m.name) || "?") + "`")
+          .join("\n");
+        addLocalMessage(
+          "**Modelos instalados**\n\n" + (list || "(no se pudo listar; revisa la conexion con Ollama)") +
+          "\n\nActual: `" + (state.selectedModel || state.settings.model || "?") + "`" +
+          "\nUsa `/modelo <nombre>` para cambiar."
+        );
+        return true;
+      }
+      const match = (state.models || []).find((m) => {
+        const name = typeof m === "string" ? m : (m && m.name) || "";
+        return name === arg || name.split(":")[0] === arg;
+      });
+      const chosen = match ? (typeof match === "string" ? match : match.name) : arg;
+      state.selectedModel = chosen;
+      state.settings.model = chosen;
+      if (dom.sidebarModelSelect) dom.sidebarModelSelect.value = chosen;
+      if (dom.settingModel) dom.settingModel.value = chosen;
+      saveSettings();
+      addLocalMessage(
+        "Modelo cambiado a `" + chosen + "`. Se guarda en tus ajustes." +
+        (match ? "" : "\n\nOjo: ese modelo no aparece en la lista de Ollama; si no existe, el chat fallara.")
+      );
+      return true;
+    }
+
+    case "/temp": {
+      const value = Number(arg.replace(",", "."));
+      if (!arg || isNaN(value) || value < 0 || value > 2) {
+        addLocalMessage("Uso: `/temp <0-2>` — ejemplo: `/temp 0.7`. Actual: `" + state.settings.temperature + "`.");
+        return true;
+      }
+      state.settings.temperature = value;
+      if (dom.settingTemperature) dom.settingTemperature.value = String(value);
+      const tempValue = $("#temp-value");
+      if (tempValue) tempValue.textContent = String(value);
+      saveSettings();
+      addLocalMessage("Temperatura ajustada a `" + value + "`.");
+      return true;
+    }
+
+    case "/notas": {
+      if (!state.notes || !state.notes.length) {
+        addLocalMessage("No tienes notas todavia. Crea una con `/nota <texto>` o desde Ajustes.");
+        return true;
+      }
+      const list = state.notes
+        .map((n, i) => (i + 1) + ". " + n.text.slice(0, 80).replace(/\n/g, " "))
+        .join("\n");
+      addLocalMessage(
+        "**Notas locales (" + state.notes.length + ")**\n\n" + list +
+        "\n\nNova usa automaticamente las 3 notas mas relevantes en cada mensaje."
+      );
+      return true;
+    }
+
+    case "/nota": {
+      if (!arg) {
+        addLocalMessage("Uso: `/nota <texto>` — ejemplo: `/nota Prefiero respuestas directas y sin emojis`.");
+        return true;
+      }
+      if (!window.novaAPI || !window.novaAPI.addNote) {
+        toast("API de notas no disponible", "error");
+        return true;
+      }
+      window.novaAPI
+        .addNote(arg.slice(0, 2000))
+        .then((result) => {
+          if (result && result.ok) {
+            loadNotes();
+            addLocalMessage("Nota guardada:\n\n> " + arg.slice(0, 200));
+          } else {
+            toast("No se pudo guardar la nota", "error");
+          }
+        })
+        .catch(() => toast("No se pudo guardar la nota", "error"));
+      return true;
+    }
+
+    default:
+      toast("Comando desconocido: " + cmd + ". Escribe /ayuda", "error");
+      return true;
   }
 }
 
@@ -1658,3 +2014,4 @@ init().catch((error) => {
   console.error("[Nova] init falló:", error);
   toast("Error al iniciar Nova Chat", "error");
 });
+

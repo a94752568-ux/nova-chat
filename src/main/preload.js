@@ -69,6 +69,11 @@ contextBridge.exposeInMainWorld("novaAPI", {
   listConversations: () => ipcRenderer.invoke("conversations:list"),
   deleteConversation: (id) => ipcRenderer.invoke("conversations:delete", id),
 
+  // Notas locales (RAG ligero)
+  listNotes: () => ipcRenderer.invoke("notes:list"),
+  addNote: (text) => ipcRenderer.invoke("notes:add", text),
+  deleteNote: (id) => ipcRenderer.invoke("notes:delete", id),
+
   // Gramática (tipo Grammarly)
   checkGrammar: ({ text, model }) =>
     ipcRenderer.invoke("grammar:check", { text, model }),
@@ -96,3 +101,4 @@ contextBridge.exposeInMainWorld("novaAPI", {
     }
   }
 });
+

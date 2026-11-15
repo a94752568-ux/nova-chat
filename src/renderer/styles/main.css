@@ -1291,3 +1291,71 @@ label,
   font-size: 13px;
 }
 .history-item__delete:hover { color: #ff5f7a; background: rgba(255, 95, 122, 0.08); }
+
+
+/* ============================================================================
+   Poder local: personalidades + notas (RAG ligero) + comandos slash
+   ============================================================================ */
+.settings-group__hint {
+  color: var(--text-3, #6f6889);
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+.notes-add {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0 14px;
+}
+.notes-add textarea {
+  resize: vertical;
+  min-height: 56px;
+  font-family: var(--font-ui, inherit);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px 12px;
+}
+.notes-add .btn { align-self: flex-end; }
+.notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.notes-empty {
+  color: var(--text-3, #6f6889);
+  font-size: 12.5px;
+  padding: 8px 2px;
+}
+.note-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 10px;
+  background: var(--surface, rgba(255, 255, 255, 0.03));
+  padding: 10px 12px;
+}
+.note-item__text {
+  flex: 1;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text, inherit);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.note-item__delete {
+  border: none;
+  background: transparent;
+  color: var(--text-3, #6f6889);
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 13px;
+}
+.note-item__delete:hover {
+  color: #ff5f7a;
+  background: rgba(255, 95, 122, 0.08);
+  border-radius: 6px;
+}

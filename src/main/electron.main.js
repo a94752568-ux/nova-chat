@@ -367,6 +367,63 @@ function registerIpcHandlers() {
   });
 
 
+  // ---------------------------------------------------------------------------
+  // Notas locales (RAG ligero): texto libre del usuario que el renderer
+  // inyecta por relevancia en el system prompt. Todo vive en notes.json.
+  // ---------------------------------------------------------------------------
+  const notesFile = function () {
+    return path.join(app.getPath("userData"), "notes.json");
+  };
+  const readNotes = function () {
+    try {
+      const data = JSON.parse(fs.readFileSync(notesFile(), "utf8"));
+      return Array.isArray(data) ? data : [];
+    } catch (_) {
+      return [];
+    }
+  };
+  const writeNotes = function (list) {
+    fs.mkdirSync(app.getPath("userData"), { recursive: true });
+    fs.writeFileSync(notesFile(), JSON.stringify(list, null, 2), "utf8");
+  };
+
+  ipcMain.handle("notes:list", () => {
+    try {
+      return { ok: true, notes: readNotes() };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("notes:add", (event, text) => {
+    try {
+      const clean = typeof text === "string" ? text.trim().slice(0, 2000) : "";
+      if (!clean) return { ok: false, error: "Nota vacia" };
+      const list = readNotes();
+      // Sin duplicados exactos: guardar dos veces lo mismo no aporta contexto
+      if (list.some((n) => n.text === clean)) return { ok: true, duplicate: true };
+      list.unshift({
+        id: "note_" + Date.now() + "_" + Math.random().toString(36).slice(2, 9),
+        text: clean,
+        createdAt: new Date().toISOString()
+      });
+      // Cap de 200 notas: el system prompt solo usa 3, pero el disco no es infinito
+      writeNotes(list.slice(0, 200));
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("notes:delete", (event, id) => {
+    try {
+      writeNotes(readNotes().filter((n) => n.id !== id));
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+
   // Ollama
   ipcMain.handle("ollama:health", checkOllamaHealth);
   ipcMain.handle("ollama:models", listModels);
@@ -540,3 +597,4 @@ app.on("will-quit", () => {
 });
 
 module.exports = { app, settings, createMainWindow, initOllama };
+

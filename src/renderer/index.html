@@ -298,6 +298,15 @@
                 <option value="light">Claro</option>
               </select>
             </div>
+            <div class="settings-field">
+              <label class="settings-field__label">Personalidad</label>
+              <select id="setting-persona" class="settings-field__input">
+                <option value="nova">Nova (cercana)</option>
+                <option value="directa">Directa (concisa)</option>
+                <option value="mentor">Mentor (paso a paso)</option>
+                <option value="coder">Coder (tecnica)</option>
+              </select>
+            </div>
             <div class="settings-field settings-field--checkbox">
               <input type="checkbox" id="setting-minimize-tray" class="settings-field__checkbox" checked />
               <label class="settings-field__label" for="setting-minimize-tray">Minimizar a bandeja del sistema</label>
@@ -306,6 +315,16 @@
               <input type="checkbox" id="setting-auto-start" class="settings-field__checkbox" />
               <label class="settings-field__label" for="setting-auto-start">Iniciar con el sistema</label>
             </div>
+          </div>
+
+          <div class="settings-group">
+            <h3 class="settings-group__title">Notas locales (RAG ligero)</h3>
+            <p class="settings-group__hint">Texto libre que Nova consulta en cada mensaje: datos tuyos, estilo de escritura, proyectos. Solo viajan al modelo las 3 notas mas relevantes.</p>
+            <div class="notes-add">
+              <textarea id="note-input" class="settings-field__input" rows="2" placeholder="Ej: Me llamo Alberto, prefiero respuestas directas y sin emojis"></textarea>
+              <button class="btn btn--ghost" id="btn-add-note">Agregar nota</button>
+            </div>
+            <div id="notes-list" class="notes-list"></div>
           </div>
 
           <div class="settings-actions">
@@ -323,3 +342,4 @@
   <script src="renderer.js" type="module"></script>
 </body>
 </html>
+
