@@ -94,6 +94,7 @@ function cacheDom() {
 
   // Panel de gramática
   dom.grammarInput = $("#grammar-input");
+  dom.grammarOverlay = $("#grammar-overlay");
   dom.btnCheckCurrent = $("#btn-check-current");
   dom.btnFixAll = $("#btn-fix-all");
   dom.btnClearGrammar = $("#btn-clear-grammar");
@@ -312,6 +313,12 @@ function setupGrammarListeners() {
   if (dom.btnClearGrammar) {
     dom.btnClearGrammar.addEventListener("click", clearGrammarEditor);
   }
+  if (dom.grammarInput) {
+    // Fase 3: subrayados en vivo + re-check con debounce mientras escribes
+    dom.grammarInput.addEventListener("input", handleGrammarInputLive);
+    dom.grammarInput.addEventListener("scroll", syncGrammarOverlayScroll);
+  }
+  window.addEventListener("resize", renderGrammarOverlay);
 }
 
 function setupSettingsListeners() {
@@ -1593,6 +1600,7 @@ async function toggleGrammarInPage(enabled) {
     state.grammar.score = 100;
     state.grammar.counts = { grammar: 0, spelling: 0, clarity: 0, tone: 0 };
     renderGrammarStats();
+    renderGrammarOverlay();
   }
 }
 
@@ -1624,6 +1632,8 @@ async function requestGrammarCheckForPage() {
 }
 
 let grammarCheckInFlight = false;
+let grammarRecheckTimer = null;
+let grammarLastCheckedText = "";
 
 async function checkGrammarInEditor() {
   const text = dom.grammarInput.value.trim();
@@ -1648,6 +1658,8 @@ async function checkGrammarInEditor() {
       computeGrammarScore();
       renderGrammarStats();
       displayGrammarIssues(response.issues);
+      grammarLastCheckedText = text;
+      renderGrammarOverlay();
     } else {
       // Ollama caído, timeout o error: AVISAR (antes fallaba en silencio
       // y parecía que el botón no hacía nada)
@@ -1712,6 +1724,8 @@ async function fixAllGrammar() {
     state.grammar.counts = { grammar: 0, spelling: 0, clarity: 0, tone: 0 };
     renderGrammarStats();
     dom.grammarOutput.innerHTML = '<div class="grammar-stats__empty">✨ Texto corregido</div>';
+    grammarLastCheckedText = corrected;
+    renderGrammarOverlay();
     toast("Gramática corregida", "ok");
   } catch (error) {
     toast("Error al aplicar correcciones", "error");
@@ -1724,7 +1738,9 @@ function clearGrammarEditor() {
   state.grammar.issues = [];
   state.grammar.score = 100;
   state.grammar.counts = { grammar: 0, spelling: 0, clarity: 0, tone: 0 };
+  grammarLastCheckedText = "";
   renderGrammarStats();
+  renderGrammarOverlay();
 }
 
 function computeGrammarScore() {
@@ -1793,6 +1809,17 @@ function renderGrammarStats() {
         // Clic en un issue = localizarlo en el texto (como Grammarly)
         item.style.cursor = "pointer";
         item.addEventListener("click", () => locateIssue(issue));
+        // Fase 3: boton para corregir SOLO este issue
+        const fixBtn = document.createElement("button");
+        fixBtn.type = "button";
+        fixBtn.className = "grammar-fix-btn";
+        fixBtn.textContent = "Corregir";
+        if (!issue.suggestion) fixBtn.hidden = true;
+        fixBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          fixSingleIssue(issue);
+        });
+        item.appendChild(fixBtn);
         dom.grammarList.appendChild(item);
       }
     }
@@ -1826,6 +1853,17 @@ function displayGrammarIssues(issues) {
     // Clic en un issue = localizarlo en el texto (como Grammarly)
     item.style.cursor = "pointer";
     item.addEventListener("click", () => locateIssue(issue));
+    // Fase 3: boton para corregir SOLO este issue
+    const fixBtn = document.createElement("button");
+    fixBtn.type = "button";
+    fixBtn.className = "grammar-fix-btn";
+    fixBtn.textContent = "Corregir";
+    if (!issue.suggestion) fixBtn.hidden = true;
+    fixBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      fixSingleIssue(issue);
+    });
+    item.appendChild(fixBtn);
     dom.grammarOutput.appendChild(item);
   });
 }
@@ -1855,6 +1893,159 @@ function locateIssue(issue) {
       textarea.scrollTop = Math.max(0, line * 24 - textarea.clientHeight / 2);
       return;
     }
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Fase 3: subrayados en vivo, correccion por issue y re-check con debounce
+// ----------------------------------------------------------------------------
+
+// Valida los indices de un issue contra el texto actual. Si el modelo se
+// equivoco de posicion, intenta localizar el texto exacto. Null si ya no existe.
+function normalizeIssueRange(issue, text) {
+  if (!issue || !issue.text) return null;
+  const start = Number(issue.start);
+  const end = Number(issue.end);
+  const valid = Number.isInteger(start) && Number.isInteger(end)
+    && start >= 0 && start < end && end <= text.length
+    && text.slice(start, end) === issue.text;
+  if (valid) return { issue, start, end };
+  const found = text.indexOf(issue.text);
+  if (found === -1) return null;
+  return { issue, start: found, end: found + issue.text.length };
+}
+
+// Redibuja los subrayados del overlay sobre el textarea de gramatica.
+// El overlay es un espejo del texto (mismo font/padding/line-height, color
+// transparente) con spans subrayados por tipo de issue. Todo se construye
+// con textContent: el texto del usuario jamas se interpola como HTML.
+function renderGrammarOverlay() {
+  if (!dom.grammarOverlay || !dom.grammarInput) return;
+  const text = dom.grammarInput.value;
+  const overlay = dom.grammarOverlay;
+  overlay.innerHTML = "";
+
+  const placed = [];
+  let cursor = 0;
+  const ranges = (state.grammar.issues || [])
+    .map((issue) => normalizeIssueRange(issue, text))
+    .filter(Boolean)
+    .sort((a, b) => a.start - b.start);
+  for (const range of ranges) {
+    if (range.start < cursor) continue; // sin solapes
+    placed.push(range);
+    cursor = range.end;
+  }
+
+  const frag = document.createDocumentFragment();
+  cursor = 0;
+  for (const range of placed) {
+    if (range.start > cursor) {
+      frag.appendChild(document.createTextNode(text.slice(cursor, range.start)));
+    }
+    const mark = document.createElement("span");
+    mark.className = "gul gul--" + safeIssueType(range.issue);
+    mark.textContent = text.slice(range.start, range.end);
+    frag.appendChild(mark);
+    cursor = range.end;
+  }
+  if (cursor < text.length) {
+    frag.appendChild(document.createTextNode(text.slice(cursor)));
+  }
+  overlay.appendChild(frag);
+  syncGrammarOverlayScroll();
+}
+
+function syncGrammarOverlayScroll() {
+  if (!dom.grammarOverlay || !dom.grammarInput) return;
+  dom.grammarOverlay.scrollTop = dom.grammarInput.scrollTop;
+}
+
+// Tras editar, los indices viejos quedan desfasados: re-localiza cada issue
+// por su texto exacto y suelta los que ya no existen en el texto.
+function revalidateGrammarIssues() {
+  const text = dom.grammarInput ? dom.grammarInput.value : "";
+  if (!text) {
+    state.grammar.issues = [];
+  } else {
+    state.grammar.issues = (state.grammar.issues || []).filter((issue) => {
+      return normalizeIssueRange(issue, text) !== null;
+    });
+  }
+  computeGrammarScore();
+  renderGrammarStats();
+}
+
+// Corregir UN issue: aplica su suggestion, re-localiza los demas y refresca
+// lista, stats y subrayados. Las ediciones manuales del usuario nunca se pisan.
+function fixSingleIssue(issue) {
+  if (!issue || !issue.suggestion) return;
+  if (!dom.grammarInput) return;
+  const text = dom.grammarInput.value;
+  const range = normalizeIssueRange(issue, text);
+  if (!range) {
+    toast("Ese problema ya no esta en el texto", "info");
+    revalidateGrammarIssues();
+    renderGrammarOverlay();
+    return;
+  }
+  const corrected = text.slice(0, range.start) + issue.suggestion + text.slice(range.end);
+  dom.grammarInput.value = corrected;
+  state.grammar.issues = (state.grammar.issues || []).filter((i) => i !== issue);
+  revalidateGrammarIssues();
+  renderGrammarOverlay();
+  grammarLastCheckedText = corrected;
+  toast("Corregido: " + issue.text.slice(0, 30), "ok");
+}
+
+// Re-check automatico con debounce: mientras escribes en el editor, espera a
+// que pares 1.2s y manda la revision solo. Silencioso (sin toasts: el usuario
+// esta escribiendo, no pidio una revision explicita) y sin chequeos repetidos
+// del mismo texto.
+function handleGrammarInputLive() {
+  revalidateGrammarIssues();
+  renderGrammarOverlay();
+  scheduleGrammarRecheck();
+}
+
+function scheduleGrammarRecheck() {
+  if (grammarRecheckTimer) clearTimeout(grammarRecheckTimer);
+  grammarRecheckTimer = setTimeout(autoCheckGrammarEditor, 1200);
+}
+
+async function autoCheckGrammarEditor() {
+  if (!dom.grammarInput) return;
+  const text = dom.grammarInput.value.trim();
+  if (!text) return;
+  if (text === grammarLastCheckedText) return;
+  if (grammarCheckInFlight) {
+    // Hay un chequeo en vuelo: reintentar cuando termine
+    scheduleGrammarRecheck();
+    return;
+  }
+  grammarCheckInFlight = true;
+  if (dom.btnCheckCurrent) dom.btnCheckCurrent.disabled = true;
+  showVerbose("ESCANEO GRAMATICAL");
+  updateVerbose("re-chequeo automatico...");
+  try {
+    const response = await window.novaAPI.checkGrammar({
+      text,
+      model: state.selectedModel || state.settings.model || ""
+    });
+    if (response.ok && Array.isArray(response.issues)) {
+      state.grammar.issues = response.issues;
+      computeGrammarScore();
+      renderGrammarStats();
+      displayGrammarIssues(response.issues);
+      grammarLastCheckedText = text;
+      renderGrammarOverlay();
+    }
+  } catch (_) {
+    /* silencioso: es un chequeo automatico */
+  } finally {
+    grammarCheckInFlight = false;
+    if (dom.btnCheckCurrent) dom.btnCheckCurrent.disabled = false;
+    hideVerbose();
   }
 }
 
@@ -2014,4 +2205,5 @@ init().catch((error) => {
   console.error("[Nova] init falló:", error);
   toast("Error al iniciar Nova Chat", "error");
 });
+
 

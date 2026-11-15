@@ -218,7 +218,10 @@
           </div>
         </header>
         <div class="grammar-editor">
-          <textarea id="grammar-input" placeholder="Pega tu texto aquí para revisión gramatical…" rows="10"></textarea>
+          <div class="grammar-editor__wrap">
+            <textarea id="grammar-input" placeholder="Pega tu texto aquí para revisión gramatical…" rows="10"></textarea>
+            <div id="grammar-overlay" class="grammar-overlay" aria-hidden="true"></div>
+          </div>
           <div class="grammar-actions">
             <button class="btn btn--primary" id="btn-fix-all">Corregir todo</button>
             <button class="btn btn--ghost" id="btn-clear-grammar">Limpiar</button>
@@ -342,4 +345,5 @@
   <script src="renderer.js" type="module"></script>
 </body>
 </html>
+
 
