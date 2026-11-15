@@ -21,6 +21,7 @@ const state = {
     autocompleteEnabled: true,
     theme: "dark",
     autoStart: false,
+    soundEnabled: true,
     minimizeToTray: true
   },
   models: [],
@@ -68,6 +69,7 @@ function cacheDom() {
   dom.btnOllamaStatus = $("#btn-ollama-status");
   dom.btnNewChat = $("#btn-new-chat");
   dom.btnClearChat = $("#btn-clear-chat");
+  dom.btnExportChat = $("#btn-export-chat");
 
   // Chat
   dom.messages = $("#messages");
@@ -76,6 +78,7 @@ function cacheDom() {
   dom.composerForm = $("#composer-form");
   dom.promptInput = $("#prompt-input");
   dom.composerHint = $("#composer-hint");
+  dom.composerStats = $("#composer-stats");
   dom.btnStop = $("#btn-stop");
   dom.btnSend = $("#btn-send");
   dom.chips = $("#chips");
@@ -126,6 +129,7 @@ function cacheDom() {
   dom.settingTheme = $("#setting-theme");
   dom.settingMinimizeTray = $("#setting-minimize-tray");
   dom.settingAutoStart = $("#setting-auto-start");
+  dom.settingSound = $("#setting-sound");
   dom.btnSaveSettings = $("#btn-save-settings");
   dom.btnResetSettings = $("#btn-reset-settings");
 
@@ -175,6 +179,12 @@ function setupEventListeners() {
   if (dom.btnMinimize && window.novaAPI) {
     dom.btnMinimize.addEventListener("click", () => window.novaAPI.minimize());
   }
+
+  // Fase 4: exportar conversacion + atajos de teclado globales
+  if (dom.btnExportChat) {
+    dom.btnExportChat.addEventListener("click", exportConversation);
+  }
+  document.addEventListener("keydown", handleAppShortcuts);
   if (dom.btnMaximize && window.novaAPI) {
     dom.btnMaximize.addEventListener("click", () => window.novaAPI.maximize());
   }
@@ -384,6 +394,12 @@ function setupSettingsListeners() {
     });
   }
 
+  if (dom.settingSound) {
+    dom.settingSound.addEventListener("change", (e) => {
+      state.settings.soundEnabled = e.target.checked;
+    });
+  }
+
   dom.btnSaveSettings.addEventListener("click", saveSettings);
   dom.btnResetSettings.addEventListener("click", resetSettings);
 
@@ -413,6 +429,7 @@ async function loadSettings() {
     dom.settingTimeout.value = state.settings.requestTimeoutMs || 30000;
     dom.settingTheme.value = state.settings.theme;
     if (dom.settingPersona) dom.settingPersona.value = state.settings.persona || "nova";
+    if (dom.settingSound) dom.settingSound.checked = state.settings.soundEnabled !== false;
     dom.settingMinimizeTray.checked = state.settings.minimizeToTray;
     dom.settingAutoStart.checked = state.settings.autoStart;
 
@@ -458,6 +475,7 @@ function resetSettings() {
     autocompleteEnabled: true,
     theme: "dark",
     autoStart: false,
+    soundEnabled: true,
     minimizeToTray: true
   };
   state.selectedModel = "gemma2:2b";
@@ -477,6 +495,8 @@ function updateSettingsUI() {
   dom.settingTheme.value = state.settings.theme;
   dom.settingMinimizeTray.checked = state.settings.minimizeToTray;
   dom.settingAutoStart.checked = state.settings.autoStart;
+  if (dom.settingPersona) dom.settingPersona.value = state.settings.persona || "nova";
+  if (dom.settingSound) dom.settingSound.checked = state.settings.soundEnabled !== false;
   $("#temp-value").textContent = state.settings.temperature;
   $("#num-ctx-value").textContent = state.settings.numCtx;
 }
@@ -591,6 +611,7 @@ function updateModelSelectors(models) {
 // Auto-crecer el textarea mientras el usuario escribe.
 function handleComposerInput() {
   autoResizeTextarea();
+  updateComposerStats();
 }
 
 // Enter envía, Shift+Enter salto de línea. Si el dropdown de autocompletado
@@ -631,6 +652,7 @@ async function handleSendMessage(event) {
   dom.promptInput.value = "";
   autoResizeTextarea();
   dom.composerHint.textContent = "Generando respuesta…";
+  playSound("send");
 
   // Mostrar indicador de escritura
   showTyping();
@@ -696,6 +718,8 @@ async function runChatStream(model, messages) {
       assistantMessage.durationMs = Date.now() - assistantMessage.createdAt;
       updateMessageMeta(messageElement, assistantMessage);
       dom.composerHint.textContent = "Respuesta generada";
+      playSound("done");
+      updateComposerStats();
     } else {
       dom.composerHint.textContent = "Sin respuesta del modelo";
     }
@@ -740,6 +764,7 @@ async function runChatStream(model, messages) {
         contentElement.textContent = "Error al generar la respuesta.";
         contentElement.classList.add("bubble--error");
         dom.composerHint.textContent = "Error al generar respuesta";
+        playSound("error");
         toast("Error al conectar con Ollama", "error");
         finish();
       }
@@ -2107,6 +2132,136 @@ async function handleQuickAction(action) {
   }
 }
 
+// ----------------------------------------------------------------------------
+// Fase 4: atajos de teclado, exportar, contador de contexto y sonidos
+// ----------------------------------------------------------------------------
+
+// Atajos globales de la app (Ctrl/Cmd + tecla). Escape detiene la generacion.
+// No toca teclas sin modificador: el autocompletado y el editor siguen intactos.
+function handleAppShortcuts(e) {
+  const mod = e.ctrlKey || e.metaKey;
+  if (!mod) {
+    if (e.key === "Escape" && state.generating && state.activeStreamCancel) {
+      stopGeneration();
+    }
+    return;
+  }
+  const key = e.key ? e.key.toLowerCase() : "";
+  if (key === "n") { e.preventDefault(); startNewChat(); return; }
+  if (key === "e") { e.preventDefault(); exportConversation(); return; }
+  if (key === "d") { e.preventDefault(); if (dom.promptInput) dom.promptInput.focus(); return; }
+  const sections = { "1": "chat", "2": "grammar", "3": "history", "4": "settings" };
+  if (sections[key]) { e.preventDefault(); switchSection(sections[key]); }
+}
+
+// Exporta la conversacion actual como Markdown con dialogo nativo de guardado.
+// Sin IPC disponible (o cancelado): fallback al portapapeles.
+function buildConversationMarkdown() {
+  const lines = [];
+  const model = state.selectedModel || state.settings.model || "?";
+  const persona = getPersona();
+  lines.push("# Conversacion Nova Chat");
+  lines.push("");
+  lines.push("- Fecha: " + new Date().toLocaleString());
+  lines.push("- Modelo: " + model);
+  lines.push("- Personalidad: " + persona.name + " (" + state.settings.persona + ")");
+  lines.push("- Mensajes: " + state.messages.length);
+  lines.push("");
+  lines.push("---");
+  lines.push("");
+  for (const m of state.messages) {
+    const who = m.role === "user" ? "Tu" : (m.local ? "Nova (local)" : "Nova");
+    lines.push("## " + who);
+    lines.push("");
+    lines.push(m.content);
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+async function exportConversation() {
+  if (!state.messages.length) {
+    toast("No hay conversacion que exportar", "info");
+    return;
+  }
+  const md = buildConversationMarkdown();
+  if (!window.novaAPI || !window.novaAPI.exportMarkdown) {
+    try {
+      await navigator.clipboard.writeText(md);
+      toast("Conversacion copiada al portapapeles", "ok");
+    } catch (_) {
+      toast("No se pudo exportar la conversacion", "error");
+    }
+    return;
+  }
+  try {
+    const result = await window.novaAPI.exportMarkdown({
+      content: md,
+      defaultName: "nova-conversacion-" + new Date().toISOString().slice(0, 10) + ".md"
+    });
+    if (result && result.ok && result.saved) toast("Exportada: " + result.path, "ok");
+    else if (result && result.ok) toast("Exportacion cancelada", "info");
+    else toast("No se pudo exportar: " + ((result && result.error) || "?"), "error");
+  } catch (_) {
+    toast("No se pudo exportar la conversacion", "error");
+  }
+}
+
+// Contador de contexto: borrador actual + estimacion de tokens del contexto
+// que viajara al modelo (system prompt + ultimos 10 mensajes). Estimacion
+// gruesa ~4 chars/token (espanol/ingles mezclado): orientativa, no exacta.
+function estimateTokens(text) {
+  return Math.ceil(String(text || "").length / 4);
+}
+
+function updateComposerStats() {
+  if (!dom.composerStats) return;
+  const draft = dom.promptInput ? dom.promptInput.value : "";
+  const draftTokens = estimateTokens(draft);
+  const systemPrompt = buildSystemPrompt(draft) || "";
+  const history = state.messages.slice(-10).filter((m) => !m.local).map((m) => m.content).join("\n");
+  const contextTokens = estimateTokens(systemPrompt + "\n" + history);
+  const ctxLimit = state.settings.numCtx || 8192;
+  const pct = Math.min(100, Math.round((contextTokens / ctxLimit) * 100));
+  dom.composerStats.textContent = draft
+    ? draft.length + " chars (~" + draftTokens + " tok)"
+    : "";
+  dom.composerStats.title = "Contexto estimado: ~" + contextTokens + " / " + ctxLimit +
+    " tokens (" + pct + "% de la ventana num_ctx)";
+}
+
+// Sonidos sutiles con Web Audio: blips cortos sintetizados, sin archivos.
+// Volumen muy bajo; si algo falla, silencio (los sonidos jamas rompen la app).
+let audioCtx = null;
+function playSound(kind) {
+  if (!state.settings.soundEnabled) return;
+  try {
+    if (!audioCtx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      audioCtx = new Ctx();
+    }
+    const conf = {
+      send:  { freq: 660, endFreq: 880, dur: 0.07, vol: 0.03, type: "sine" },
+      done:  { freq: 520, endFreq: 390, dur: 0.12, vol: 0.03, type: "sine" },
+      error: { freq: 220, endFreq: 160, dur: 0.18, vol: 0.04, type: "triangle" }
+    }[kind] || { freq: 440, endFreq: 440, dur: 0.06, vol: 0.02, type: "sine" };
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = conf.type;
+    osc.frequency.setValueAtTime(conf.freq, now);
+    osc.frequency.exponentialRampToValueAtTime(conf.endFreq, now + conf.dur);
+    gain.gain.setValueAtTime(conf.vol, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + conf.dur);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + conf.dur + 0.02);
+  } catch (_) {
+    /* silencio total ante cualquier fallo de audio */
+  }
+}
+
 // ============================================================================
 // Utilidades
 // ============================================================================
@@ -2205,5 +2360,6 @@ init().catch((error) => {
   console.error("[Nova] init falló:", error);
   toast("Error al iniciar Nova Chat", "error");
 });
+
 
 

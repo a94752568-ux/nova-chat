@@ -78,6 +78,9 @@ contextBridge.exposeInMainWorld("novaAPI", {
   checkGrammar: ({ text, model }) =>
     ipcRenderer.invoke("grammar:check", { text, model }),
 
+  // Exportar conversacion (dialogo nativo de guardado)
+  exportMarkdown: (payload) => ipcRenderer.invoke("export:markdown", payload),
+
   // Sistema
   quit: () => ipcRenderer.invoke("app:quit"),
   minimize: () => ipcRenderer.invoke("app:minimize"),
@@ -101,4 +104,5 @@ contextBridge.exposeInMainWorld("novaAPI", {
     }
   }
 });
+
 

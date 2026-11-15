@@ -1411,3 +1411,26 @@ label,
   border-color: #0aff9d;
   color: #0aff9d;
 }
+
+
+/* ============================================================================
+   Fase 4: detalles pro (contador de contexto, exportar, atajos)
+   ============================================================================ */
+.composer__stats {
+  font-size: 11px;
+  color: var(--text-3, #6f6889);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.settings-field--shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.shortcuts-hint {
+  font-size: 11.5px;
+  color: var(--text-3, #6f6889);
+  line-height: 1.6;
+  user-select: text;
+}

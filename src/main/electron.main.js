@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, globalShortcut } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, globalShortcut, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { Ollama } = require("ollama");
@@ -37,6 +37,7 @@ const DEFAULT_SETTINGS = {
   theme: "dark",
   autoStart: false,
   minimizeToTray: true,
+  soundEnabled: true,
   requestTimeoutMs: 30000
 };
 
@@ -544,6 +545,31 @@ function registerIpcHandlers() {
     }
   });
 
+  // Exportar conversacion como Markdown con dialogo nativo de guardado
+  ipcMain.handle("export:markdown", async (event, payload) => {
+    try {
+      if (!mainWindow) return { ok: false, error: "Sin ventana" };
+      const content = payload && typeof payload.content === "string" ? payload.content : "";
+      if (!content) return { ok: false, error: "Contenido vacio" };
+      const defaultName = (payload && payload.defaultName) || "nova-conversacion.md";
+      // Sanitizar el nombre: solo caracteres seguros, sin rutas trampa
+      const safeName = defaultName.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const result = await dialog.showSaveDialog(mainWindow, {
+        title: "Exportar conversacion",
+        defaultPath: safeName,
+        filters: [
+          { name: "Markdown", extensions: ["md"] },
+          { name: "Texto", extensions: ["txt"] }
+        ]
+      });
+      if (result.canceled || !result.filePath) return { ok: true, saved: false };
+      fs.writeFileSync(result.filePath, content, "utf8");
+      return { ok: true, saved: true, path: result.filePath };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+
   // Sistema
   ipcMain.handle("app:quit", () => app.quit());
   ipcMain.handle("app:minimize", () => {
@@ -597,4 +623,5 @@ app.on("will-quit", () => {
 });
 
 module.exports = { app, settings, createMainWindow, initOllama };
+
 

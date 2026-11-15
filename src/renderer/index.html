@@ -93,6 +93,9 @@
             <span class="panel__subtitle" id="chat-subtitle">IA local · Ollama</span>
           </div>
           <div class="panel__actions">
+            <button class="icon-btn" id="btn-export-chat" title="Exportar conversación (Ctrl+E)" aria-label="Exportar conversación">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
             <button class="icon-btn" id="btn-clear-chat" title="Limpiar conversación" aria-label="Limpiar">
               <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m3 0-1 12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
@@ -147,6 +150,7 @@
 
               <div class="composer__tools">
                 <span class="composer__hint" id="composer-hint">Conectando con Ollama…</span>
+                <span class="composer__stats" id="composer-stats"></span>
                 <button type="button" id="btn-stop" class="btn btn--stop" hidden title="Detener generación" aria-label="Detener">
                   <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="2.4" fill="currentColor"/></svg>
                   Detener
@@ -318,6 +322,14 @@
               <input type="checkbox" id="setting-auto-start" class="settings-field__checkbox" />
               <label class="settings-field__label" for="setting-auto-start">Iniciar con el sistema</label>
             </div>
+            <div class="settings-field settings-field--checkbox">
+              <input type="checkbox" id="setting-sound" class="settings-field__checkbox" checked />
+              <label class="settings-field__label" for="setting-sound">Sonidos sutiles (enviar/listo/error)</label>
+            </div>
+            <div class="settings-field settings-field--shortcuts">
+              <span class="settings-field__label">Atajos de teclado</span>
+              <span class="shortcuts-hint">Ctrl+N nueva conversación · Ctrl+E exportar · Ctrl+D redactar · Ctrl+1/2/3/4 paneles · Esc detener generación</span>
+            </div>
           </div>
 
           <div class="settings-group">
@@ -345,5 +357,6 @@
   <script src="renderer.js" type="module"></script>
 </body>
 </html>
+
 
 
