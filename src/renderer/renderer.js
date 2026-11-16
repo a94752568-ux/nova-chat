@@ -43,6 +43,12 @@ const state = {
     active: false,
     prefix: "",
     abortController: null
+  },
+  web: {
+    // Contexto one-shot para el modelo (de /scrap o "lee esta pagina")
+    context: null,
+    // Ultimos resultados de /buscar (para /scrap 2)
+    lastResults: []
   }
 };
 
@@ -644,6 +650,11 @@ async function handleSendMessage(event) {
     return;
   }
 
+  // Lectura web: "resume esta pagina https://..." o un mensaje que es solo
+  // una URL. Deja el texto en state.web.context para el modelo.
+  const webRead = await tryWebRead(text);
+  if (webRead === "stop") return;
+
   // Habilidades locales: "estado del sistema", hora, fecha... respuestas
   // deterministas con datos reales, sin gastar al modelo.
   const localSkill = await tryLocalSkill(text);
@@ -676,6 +687,18 @@ async function handleSendMessage(event) {
       content: m.content
     }));
     if (systemPrompt) messages.unshift({ role: "system", content: systemPrompt });
+
+    // Contexto web one-shot (de /scrap o "lee esta pagina"): viaja como
+    // mensaje system adicional (tras el system prompt) y se consume aqui.
+    if (state.web.context) {
+      const wc = state.web.context;
+      messages.splice(messages.length ? 1 : 0, 0, {
+        role: "system",
+        content: "Contexto web obtenido de " + wc.url + (wc.title ? " (\"" + wc.title + "\")" : "") +
+          ". Responde SOLO con informacion de este contexto; si no esta, dilo:\n\n" + wc.text
+      });
+      state.web.context = null;
+    }
 
     await runChatStream(model, messages);
 
@@ -1326,6 +1349,10 @@ const SKILL_DATE_RE = /que dia es hoy|fecha de hoy|que fecha es hoy|dime la fech
 // Preguntas sobre el equipo LOCAL de Alberto (laptop): solo si lo nombra
 // explicitamente o pregunta por cosas que solo tiene una laptop (bateria).
 const SKILL_LAPTOP_RE = /(mi|la|de mi)\s+(laptop|portatil|computadora|pc|maquina|equipo)|\blaptop\b|\bportatil\b|bateria|nivel de carga/i;
+// Web real: busqueda y lectura de paginas. La lectura requiere URL en el texto.
+const SKILL_WEB_RE = /busca(me)?\s+(en\s+(la\s+)?(web|internet|linea)|online|sobre|acerca)|googlea|busqueda web|buscar en (la web|internet)|que dice (la web|internet|google)/i;
+const SKILL_READ_RE = /\b(lee|leeme|resume|resumeme|analiza|scrap|scrapea|extrae|extraeme)\b/i;
+const WEB_URL_RE = /https?:\/\/[^\s<>"')\]]+/i;
 
 function formatBytesFriendly(bytes) {
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -1369,10 +1396,112 @@ async function tryLocalSkill(text) {
   if (SKILL_LAPTOP_RE.test(t)) {
     return buildLaptopStatusReport();
   }
+  if (SKILL_WEB_RE.test(t)) {
+    return buildWebSearchReport(extractWebQuery(t));
+  }
   if (SKILL_SYSTEM_RE.test(t)) {
     return buildSystemStatusReport();
   }
   return null;
+}
+
+// Extrae la consulta de frases tipo "buscame gatos en la web" / "googlea X".
+function extractWebQuery(text) {
+  return String(text || "")
+    .replace(/^busca(me)?\s+(en\s+(la\s+)?(web|internet|linea)|online)\s*:?\s*/i, "")
+    .replace(/^busca(me)?\s+(sobre|acerca de|informacion (de|sobre)|info (de|sobre))?\s*:?\s*/i, "")
+    .replace(/^googlea(r)?\s*:?\s*/i, "")
+    .replace(/\s+(en\s+(la\s+)?(web|internet))\s*$/i, "")
+    .trim();
+}
+
+// Busqueda web real (DuckDuckGo via IPC). Guarda los resultados para /scrap N.
+async function buildWebSearchReport(query) {
+  const q = String(query || "").trim();
+  if (!q) {
+    return "Dime que buscar: `/buscar <consulta>` o \"buscame <algo> en la web\".";
+  }
+  let result = null;
+  try {
+    if (window.novaAPI && window.novaAPI.webSearch) {
+      result = await window.novaAPI.webSearch(q);
+    }
+  } catch (_) {
+    /* tratado abajo */
+  }
+  if (!result || !result.ok) {
+    return "**Busqueda web fallida**: " + ((result && result.error) || "sin conexion con el buscador") + ".";
+  }
+  const results = Array.isArray(result.results) ? result.results : [];
+  state.web.lastResults = results;
+  if (!results.length) {
+    return "**Sin resultados** para \"" + q + "\". Prueba con otras palabras.";
+  }
+  const lines = ["**Busqueda web**: \"" + q + "\"", ""];
+  results.forEach((r, i) => {
+    lines.push((i + 1) + ". **" + r.title + "**");
+    if (r.snippet) lines.push("   " + r.snippet);
+    lines.push("   " + r.url);
+  });
+  lines.push("");
+  lines.push("Leer una completa: `/scrap 2` o `/scrap <url>` — el texto viaja al modelo como contexto.");
+  return lines.join("\n");
+}
+
+// Descarga una pagina y la deja lista como contexto one-shot para el modelo.
+async function buildScrapReport(arg) {
+  let url = String(arg || "").trim();
+  if (/^\d+$/.test(url)) {
+    const pick = state.web.lastResults[parseInt(url, 10) - 1];
+    if (!pick) return "No tengo ese resultado. Primero usa `/buscar <consulta>`.";
+    url = pick.url;
+  }
+  if (!WEB_URL_RE.test(url)) {
+    return "Eso no parece una URL. Usa `/scrap <url>` o `/scrap 2` (resultado de la ultima busqueda).";
+  }
+  // Contexto nuevo reemplaza al anterior (y evita reusar uno viejo si falla)
+  state.web.context = null;
+  let result = null;
+  try {
+    if (window.novaAPI && window.novaAPI.webScrap) {
+      result = await window.novaAPI.webScrap(url);
+    }
+  } catch (_) {
+    /* tratado abajo */
+  }
+  if (!result || !result.ok) {
+    return "**No pude leer la pagina**: " + ((result && result.error) || "error desconocido") + ".";
+  }
+  state.web.context = { url: result.url, title: result.title, text: result.text };
+  const preview = result.text.slice(0, 1200) + (result.text.length > 1200 ? " [...]" : "");
+  return [
+    "**Pagina leida**: " + (result.title || result.url),
+    "",
+    "> " + preview.replace(/\n/g, "\n> "),
+    "",
+    "Contexto listo (" + formatBytesFriendly(result.text.length) +
+    (result.truncated ? ", recortado" : "") + "). Preguntame lo que quieras sobre la pagina: " +
+    "la proxima respuesta la contesto con este texto. Se usa una sola vez."
+  ].join("\n");
+}
+
+// Lectura web en lenguaje natural: "resume esta pagina https://..." o un
+// mensaje que es solo una URL. Devuelve "stop" (consumio el mensaje),
+// "continue" (contexto listo, seguir hacia el modelo) o null (no aplica).
+async function tryWebRead(text) {
+  const t = String(text || "").trim();
+  const urlMatch = t.match(WEB_URL_RE);
+  if (!urlMatch) return null;
+  const onlyUrl = t === urlMatch[0];
+  if (!SKILL_READ_RE.test(t) && !onlyUrl) return null;
+
+  addLocalMessage("Leyendo **" + urlMatch[0] + "**...");
+  const scrap = await buildScrapReport(urlMatch[0]);
+  // buildScrapReport ya dejo el contexto en state.web.context si fue OK;
+  // distinguir exito de fracaso revisando el contexto.
+  const failed = !state.web.context;
+  addLocalMessage(scrap);
+  return failed ? "stop" : (onlyUrl ? "stop" : "continue");
 }
 
 // Informe del SERVIDOR Ollama (el equipo que sirve los modelos, ej.
@@ -1535,7 +1664,9 @@ async function handleSlashCommand(raw) {
         "**Comandos disponibles**",
         "- `/api` — estado de la conexion (URL, modelo, temperatura...)",
         "- `/estado` — estado del servidor Ollama (conexion, modelos, VRAM)",
-        "- Tambien en lenguaje natural: \"estado del sistema\", \"estado de mi laptop\", \"que hora es\"",
+        "- `/buscar <consulta>` — busqueda web real (DuckDuckGo, sin API key)",
+        "- `/scrap <url|N>` — lee una pagina y la pasa al modelo como contexto",
+        "- Tambien en lenguaje natural: \"buscame X en la web\", \"resume esta pagina <url>\", \"estado del sistema\", \"que hora es\"",
         "- `/persona` — lista personalidades · `/persona directa` — cambia y guarda",
         "- `/modelo` — lista modelos · `/modelo llama3.2` — cambia de modelo",
         "- `/temp 0.7` — cambia la temperatura al vuelo",
@@ -1547,6 +1678,17 @@ async function handleSlashCommand(raw) {
 
     case "/estado": {
       addLocalMessage(await buildSystemStatusReport());
+      return true;
+    }
+
+    case "/buscar":
+    case "/web": {
+      addLocalMessage(await buildWebSearchReport(arg));
+      return true;
+    }
+
+    case "/scrap": {
+      addLocalMessage(await buildScrapReport(arg));
       return true;
     }
 
@@ -2557,6 +2699,7 @@ init().catch((error) => {
   console.error("[Nova] init falló:", error);
   toast("Error al iniciar Nova Chat", "error");
 });
+
 
 
 

@@ -87,6 +87,10 @@ contextBridge.exposeInMainWorld("novaAPI", {
   // Informe del SERVIDOR Ollama (conexion, modelos cargados, VRAM)
   serverInfo: () => ipcRenderer.invoke("system:server-info"),
 
+  // Web real: busqueda (DuckDuckGo) y lector de paginas
+  webSearch: (query) => ipcRenderer.invoke("web:search", query),
+  webScrap: (url) => ipcRenderer.invoke("web:scrap", url),
+
   // Sistema
   quit: () => ipcRenderer.invoke("app:quit"),
   minimize: () => ipcRenderer.invoke("app:minimize"),
@@ -110,6 +114,7 @@ contextBridge.exposeInMainWorld("novaAPI", {
     }
   }
 });
+
 
 
 

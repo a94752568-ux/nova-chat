@@ -84,6 +84,80 @@ function withTimeout(promise, ms, label) {
 }
 
 // ============================================================================
+// Web: busqueda (DuckDuckGo, sin API key) y lector de paginas
+// ============================================================================
+const WEB_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) NovaChat/1.0";
+
+function decodeHtmlEntities(text) {
+  return String(text || "")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => {
+      try { return String.fromCodePoint(parseInt(hex, 16)); } catch (_) { return " "; }
+    })
+    .replace(/&#(\d+);/g, (_, dec) => {
+      try { return String.fromCodePoint(parseInt(dec, 10)); } catch (_) { return " "; }
+    })
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;|&apos;|&rsquo;/g, "'")
+    .replace(/&ldquo;|&rdquo;/g, "\"")
+    .replace(/&mdash;/g, "-")
+    .replace(/&hellip;/g, "...");
+}
+
+function stripTags(html) {
+  return String(html || "").replace(/<[^>]+>/g, "");
+}
+
+// Resultados del endpoint HTML de DuckDuckGo: enlaces .result__a con snippets
+// .result__snippet. Los href pueden venir envueltos en el redirect /l/?uddg=.
+function parseDuckResults(html) {
+  const results = [];
+  const linkRe = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+  const snippetRe = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+  const links = [];
+  let match;
+  while ((match = linkRe.exec(html)) !== null) links.push(match);
+  const snippets = [];
+  while ((match = snippetRe.exec(html)) !== null) snippets.push(match);
+  for (let i = 0; i < links.length; i++) {
+    let url = links[i][1];
+    const uddg = url.match(/[?&]uddg=([^&]+)/);
+    if (uddg) {
+      try { url = decodeURIComponent(uddg[1]); } catch (_) { /* url directa */ }
+    }
+    if (!/^https?:\/\//i.test(url)) continue;
+    const title = decodeHtmlEntities(stripTags(links[i][2])).trim();
+    const snippet = snippets[i] ? decodeHtmlEntities(stripTags(snippets[i][1])).trim() : "";
+    if (title && !results.some((r) => r.url === url)) results.push({ title, url, snippet });
+    if (results.length >= 8) break;
+  }
+  return results;
+}
+
+// HTML a texto plano: fuera scripts/estilos/comentarios, saltos de linea en
+// tags de bloque, entidades decodificadas, espacios colapsados.
+function htmlToText(html) {
+  return decodeHtmlEntities(
+    String(html || "")
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+      .replace(/<svg[\s\S]*?<\/svg>/gi, " ")
+      .replace(/<!--[\s\S]*?-->/g, " ")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|li|tr|h[1-6]|section|article|header|footer|blockquote|pre)>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+  )
+    .replace(/[ \t]+/g, " ")
+    .replace(/\s+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// ============================================================================
 // Icono de la app
 // ============================================================================
 // Preferencia: icon.png real si algún día existe; si no, decodifica el
@@ -659,6 +733,55 @@ function registerIpcHandlers() {
     }
   });
 
+  // Busqueda web real: DuckDuckGo (endpoint HTML, sin API key ni cuenta).
+  // Devuelve hasta 8 resultados {title, url, snippet}.
+  ipcMain.handle("web:search", async (event, query) => {
+    const q = String(query || "").trim();
+    if (!q) return { ok: false, error: "Busqueda vacia" };
+    try {
+      const url = "https://html.duckduckgo.com/html/?kl=mx-es&q=" + encodeURIComponent(q);
+      const res = await withTimeout(fetch(url, {
+        headers: { "User-Agent": WEB_UA, "Accept-Language": "es-MX,es;q=0.9,en;q=0.5" }
+      }), 8000, "web:search");
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const results = parseDuckResults(await res.text());
+      return { ok: true, query: q, results };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+
+  // Lector de paginas (scraper): descarga la URL, la convierte a texto plano
+  // y la recorta a 12000 chars para que quepa en el contexto del modelo.
+  ipcMain.handle("web:scrap", async (event, url) => {
+    const target = String(url || "").trim();
+    if (!/^https?:\/\//i.test(target)) {
+      return { ok: false, error: "URL no permitida: solo http/https" };
+    }
+    try {
+      const res = await withTimeout(fetch(target, {
+        headers: { "User-Agent": WEB_UA, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8" },
+        redirect: "follow"
+      }), 10000, "web:scrap");
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const type = String(res.headers.get("content-type") || "");
+      if (type && !/text\/html|text\/plain|application\/xhtml|text\/xml|application\/xml|json/i.test(type)) {
+        return { ok: false, error: "Tipo de contenido no soportado: " + type };
+      }
+      const buf = await res.arrayBuffer();
+      const raw = new TextDecoder("utf-8", { fatal: false }).decode(buf.slice(0, 2000000));
+      const titleMatch = raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      const title = titleMatch ? decodeHtmlEntities(stripTags(titleMatch[1])).trim() : "";
+      let text = htmlToText(raw);
+      const truncated = text.length > 12000;
+      if (truncated) text = text.slice(0, 12000);
+      if (!text) return { ok: false, error: "La pagina no devolvio texto util" };
+      return { ok: true, url: res.url || target, title, text, truncated };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+
   // Sistema
   ipcMain.handle("app:quit", () => app.quit());
   ipcMain.handle("app:minimize", () => {
@@ -712,6 +835,7 @@ app.on("will-quit", () => {
 });
 
 module.exports = { app, settings, createMainWindow, initOllama };
+
 
 
 
